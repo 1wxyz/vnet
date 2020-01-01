@@ -1,0 +1,21 @@
+#!/bin/sh
+##TAP Adapter module profile to be source/loaded when called by vnet
+[ "${0##*/}" == "${BASH_SOURCE[0]##*/}" ] && { exit 1; }
+[ "${0##*/}" == "vnet" ] || { exit 1; }
+
+# TAP Adapter is created for devices/clients that unable to create virtual interface to link up with the bridge
+# These devices/clients shall connect to this tap interface instead of the bridge interface
+# Highly recommended to use TAP Adapter instead of Dummy NIC adapter
+# One such device happens on all Oracle VirtualBox VMs.
+_tapadapter_down(){
+    ip link set dev "${VIRNET_BRIDGE}-tap" down
+    ip link delete "${VIRNET_BRIDGE}-tap"
+    return $_true
+}
+
+_tapadapter_up(){
+    ip tuntap add mode tap "${VIRNET_BRIDGE}-tap"
+    ip link set "${VIRNET_BRIDGE}-tap" address ${VIRNET_BRIDGE_TAP_MAC} master "${VIRNET_BRIDGE}" up
+    return $_true
+}
+

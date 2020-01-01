@@ -1,0 +1,260 @@
+#!/bin/sh
+##Deploy Wizard module profile to be source/loaded when called by vnet
+[ "${0##*/}" == "${BASH_SOURCE[0]##*/}" ] && { exit 1; }
+[ "${0##*/}" == "vnet" ] || { exit 1; }
+
+
+wizard_dir_install_default="/opt/vnet"
+wizard_dir_usr_bin="/usr/bin"
+
+wizard_deploy_command_extn(){
+    # $1 - command, $2 - short desc of command
+    cmd="${1}"
+    echo -e "Executing command \"$cmd\", "${2}"."
+    ${cmd} && { echo -e "[Done]\n"; return $_true; } || { echo -e "E: Fails to execute the above command.\n"; return $_false; }
+}
+
+_get_systemd_wrapper_config(){
+echo -e "## DO NOT REMOVE THIS FILE MANUALLY. Run command \"vnet uninstall\" and follow the onscreen instructions ##
+## To know the status of this service, run command \"systemctl <options> vnet.service\" for diagnose service status. ##
+
+[Unit]
+Description=Virtual Network Auto Processor
+After=network-online.target
+Wants=network-online.target
+#Documentation=man:lxd(1)
+#Before=lxd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${install_path}/vnet startup
+ExecStop=${install_path}/vnet shutdown
+
+[Install]
+WantedBy=multi-user.target"
+return $_true
+}
+
+process_distro_lsm_type(){
+    lsm_type=""
+    # To process LSM that may occur on different distro
+    [ -f /etc/sysconfig/selinux ] && {  source /etc/sysconfig/selinux; lsm_type="selinux"; return $_true; }	#Check for selinux
+    [ -x /usr/bin/aa-enabled ] && /usr/bin/aa-enabled &>/dev/null && { lsm_type="apparmor"; return $_true; }	#Check for apparmor
+
+    return $_false
+}
+
+process_distro_lsm_polcies(){
+    # ${1}, 0 - uninstall, 1 - install
+    # Process lsm policies for vnet
+    # Current settings applied to selinux only
+    [ -z "${1}" ] && { echo "E: Need mode: 0 - uninstall, 1 - install"; return $_false; }
+    if [ "${lsm_type}" == "selinux" ]; then
+    	[ "${1}" == "0" ] && { context_mode="-d"; msg_mode="remove/delete"; }
+    	[ "${1}" == "1" ] && { context_mode="-a"; msg_mode="apply"; }
+    	wizard_deploy_command_extn "$_need_sudo semanage fcontext $context_mode -s system_u -t bin_t ${install_path}/vnet" "$msg_mode vnet executable with ${lsm_type} user \"system_u\" and object type \"bin_t\"."
+	wizard_deploy_command_extn "$_need_sudo restorecon -F ${install_path}/vnet" "$msg_mode updated selinux context to vnet executable."
+
+	wizard_deploy_command_extn "$_need_sudo semanage fcontext $context_mode -s system_u -t systemd_unit_file_t ${install_path}/vnet.service" "apply vnet systemd config file with selinux user \"system_u\" and object type \"systemd_unit_file_t\"."
+	wizard_deploy_command_extn "$_need_sudo restorecon -F ${install_path}/vnet.service" "$msg_mode updated selinux context to vnet systemd config file."
+    fi
+    return $_true
+}
+
+process_install_path_usrreq(){
+    #install_path - has been initialised before this function call
+    choice=${install_path}
+    echo -e "vnet by default installs to \"$install_path\". You may define alternative directory where vnet shall installs to."
+    read -p "Specify new path or [Enter] to use defaults @ \"$install_path\".: " -i $choice -e choice
+    # Check file or dir exist based on user's choice - Begin #
+    eval choice=$choice
+    [ -n "${choice}" ] && 
+    { [ -e "${choice}" ] && 
+   	{ [ -d "${choice}" ] && 
+		{ [ -x "${choice}"/vnet ] && [ ! -f "${choice}"/install.failed ] &&
+			{ echo -e "E: vnet has already been installed in this directory \""${choice}"\". Exiting."; exit 2; } ||
+			{ [ -f "${choice}"/install.failed ] || { echo -e "W: \""${choice}"\" provided is an existing directory, shall append your choice as \""${choice}"/vnet\"."; install_path="${choice}"/vnet; } && 
+				{ install_path="${choice}"; } 
+			}
+		} || 
+		{ echo -e "W: \""${choice}"\" provided is an existing file, please check your entry and re-run the install command again, exiting.."; return $_false; } } || 
+	{ install_path="${choice}";  }
+    }
+    # Check file or dir exist based on user's choice - End #
+    [ "${install_path}" != "${wizard_dir_install_default}" ] && { echo -e "I: Install path updated to \""${install_path}"\"."; } || { echo -e "I: Install path remains unchanged \""${install_path}"\"."; }
+    return $_true
+}
+
+## This should be placed at the bottom of this module file ##
+wizard_deploy_welcome(){
+    echo -e "Welcome to Virtual Network (vnet) Kit Deploy Wizard.\nInstallation, Upgrade or Uninstallation request will be processed here.\n"
+    return $_true
+}
+
+wizard_deploy_upgrade_main(){
+    # Check version of this module and the existing version setup on the target device/unit.
+    wizard_deploy_welcome
+    _check_exec_installed_dir &>/dev/null && { echo -e "I: You are performing upgrade request from installed side of vnet @ \"${topdir}\".\n   Please run upgrade request from the downloaded package instead."; return $_false; }
+
+    install_path="${wizard_dir_install_default}"
+    read -p "I need to know your current vnet install location.: " -i ${install_path} -e install_path
+    # Check file or dir exist based on user's choice - Begin #
+    eval install_path=$install_path
+    [ -n "${install_path}" ] && [ -x "${install_path}"/vnet ] && { installed_ver=$(grep "version=" "${install_path}/vnet" | cut -d = -f 2 | sed 's/"//g'); } || 
+	    { echo -e "E: Installed path given does not contains vnet.Exiting.."; return $_false; }
+    echo -e "Installed Version: ${installed_ver}\nPackage Version: ${version}\n"
+    version_int=($(echo ${version} | sed 's/\./ /g'))
+    installed_ver_int=($(echo ${installed_ver} | sed 's/\./ /g'))
+  
+    _tmp_status=0	#1 - newer, 2 - older, 3 - same
+
+    if [[ ${version_int[0]} -gt ${installed_ver_int[0]} ]]; then 
+	    _tmp_status=1;
+    elif [[ ${version_int[0]} -lt ${installed_ver_int[0]} ]]; then
+	    _tmp_status=2;
+    else  
+	    _tmp_status=3; 
+    fi
+
+    if [[ ${_tmp_status} == 3 ]] && [[ ${version_int[1]} -gt ${installed_ver_int[1]} ]]; then
+	    _tmp_status=1;
+    elif [[ ${_tmp_status} == 3 ]] && [[ ${version_int[1]} -lt ${installed_ver_int[1]} ]]; then
+	    _tmp_status=2; 
+    elif [[ ${_tmp_status} == 3 ]]; then 
+	    _tmp_status=3;
+    fi
+
+    if [[ ${_tmp_status} == 3 ]] && [[ ${version_int[2]} -gt ${installed_ver_int[2]} ]]; then
+	    _tmp_status=1;
+    elif [[ ${_tmp_status} == 3 ]] && [[ ${version_int[2]} -lt ${installed_ver_int[2]} ]]; then 
+	    _tmp_status=2;
+    elif [[ ${_tmp_status} == 3 ]]; then
+	    _tmp_status=3;
+    fi
+
+    if [[ ${_tmp_status} == 1 ]]; then
+	    echo -e "New version found!";
+    elif [[ ${_tmp_status} == 2 ]]; then
+	    echo -e "Packaged version is older than installed version, skipping."; return $_false;
+    elif [[ ${_tmp_status} == 3 ]]; then
+	    echo -e "It's still the same version, we will have new releases soon :)"; return $_false;
+    fi
+
+    has_fault=0
+
+    echo -e "\nvnet performs upgrade by replacing the main vnet file, modules if the forcibly.\nProfile(s) files in profiles directory will only be modified with changes so that it will work with the updated version of vnet.\nexec directory belongs to runtime file and will not be touched."
+    
+    echo -e "\nChanges to file system will begin here...\n"
+    read -p "» To continue, enter Y. [Y/n] : " choice
+    [ "${choice}" = "Y" ] || { echo -e "» User choose to abort vnet upgrade. No changes made to the host's filesystem, yet! =)"; return $_false; }
+    shared_root_rights_check_ask || { return $_false; }
+
+    ## Stage 1 - replace files ##
+    cd ${0%%/*}
+    wizard_deploy_command_extn "$_need_sudo cp -rf vnet modules CHANGELOG ${install_path}" "Replacing main module (vnet) and modules." || { echo -e "E: Fails to replace files required for the upgrade."; has_fault=1; }
+    _get_systemd_wrapper_config | $_need_sudo tee "${install_path}/vnet.service" &>/dev/null && \
+	wizard_deploy_command_extn "$_need_sudo systemctl daemon-reload" "Reload systemd units to allow new vnet.service file loaded to runtime.." || \
+	{ echo -e "E: Error performing daemon file update/reload."; has_fault=1; }
+    
+
+    ## Stage 2 - Patch profiles ##
+    # Not required at this stage
+
+    [ ${has_fault} == 1 ] && { echo "W: One or more error(s) has occured! Upgrade unsuccessful and vnet may not work on next start/restart."; return $_false; }
+
+    return $_true
+}
+
+wizard_deploy_install_main(){
+    wizard_deploy_welcome
+    _check_exec_installed_dir &>/dev/null && { echo "I: vnet is installed in this directory \"${topdir}\", why do you need to install it again?"; return $_false; }
+
+    echo -e "Hi! Thanks for having the intention to use vnet. Before that, we would like to get things setup on your host machine.\nPlease follow the instructions as follows.\n"
+    echo -e "In short summary, what's going to happen.\n1. Install vnet modules to /opt/vnet\n2. Symlink vnet executable script to /usr/bin\n3. Setup vnet systemd module for auto-startup, which will automatically setup the virtual network(s)/profile(s) if PERSISTENT field is set to true on each profile config.\n"
+
+    ## Variables 
+    DISTRO=$(grep  "^NAME=" /etc/os-release | cut -d= -f2)
+    install_path="${wizard_dir_install_default}"
+
+    echo -e "\n● Step 1: Getting environment information, user input(s).\n"
+    process_install_path_usrreq || { return $_false; }
+
+    ## Linux Security Manager (LSM) check
+    process_distro_lsm_type && { echo -e "I: LSM found for $DISTRO and is \"$lsm_type\"."; } || { echo -e "I: Either no LSM is installed or unknown LSM found for $DISTRO on this instance."; }
+
+    echo -e "\nChanges to file system will begin here...\n"
+    read -p "» To continue, enter Y. [Y/n] : " choice
+    [ "${choice}" = "Y" ] || { echo -e "» User choose to abort installation. No changes made to the host's filesystem, yet! =)"; return $_false; }
+    shared_root_rights_check_ask || { return $_false; }
+
+    echo -e "\n● Step 2: File Operation, setting up directories and copy the required files for vnet modules to work.\n"
+    wizard_deploy_command_extn "$_need_sudo mkdir -p ${install_path}" "create top directory for vnet"
+    wizard_deploy_command_extn "$_need_sudo touch -f ${install_path}/install.failed" "create empty file \"install.failed\" which will be deleted if deploy completed successfully." || { return $_false; }
+    wizard_deploy_command_extn "$_need_sudo cp -r vnet modules CHANGELOG ${install_path}" "copy files and directories required for vnet to top directory of vnet." || { return $_false; }
+    [ ! -d ${install_path}/exec ] && { wizard_deploy_command_extn "$_need_sudo mkdir  ${install_path}/exec" "create \"exec\" dir required for vnet on vnet's top directory." || { return $_false; } }
+    [ ! -d ${install_path}/profiles ] && { wizard_deploy_command_extn "$_need_sudo mkdir ${install_path}/profiles" "create \"profiles\" dir required for vnet on vnet's top directory." || { return $_false; } }
+    
+    ## Process systemd file to be placed in ${install_path} and symlinked to /etc/systemd/system
+    _get_systemd_wrapper_config | $_need_sudo tee "${install_path}/vnet.service" &>/dev/null && $_need_sudo ln -sf "${install_path}/vnet.service" /etc/systemd/system/vnet.service && { echo -e "I: Successfully written systemd config for vnet to \"${install_path}/vnet.service\" and symlinked to \"/etc/systemd/system\"."; } || { echo -e "E: Error writting systemd config for vnet to \"${install_path}/vnet.service\" and symlinked to \"/etc/systemd/system\"."; return $_false; }
+
+    echo -e "\n● Step 3: Applying LSM modules for $DISTRO (if applicable).\n"
+    ## Setup LSM policies for vnet modules
+    process_distro_lsm_polcies 1 || { return $_false; }
+
+    echo -e "## Do not removed or edit this file at all time.\nVIRNET_INSTALLED_PATH=\"${install_path}\"" | $_need_sudo tee ${install_path}/.installed  &>/dev/null || { return $_false; }
+    wizard_deploy_command_extn "$_need_sudo systemctl enable vnet.service" "enables vnet.service." || { return $_false; }
+    wizard_deploy_command_extn "$_need_sudo systemctl start vnet.service" "starts vnet.service." || { return $_false; }
+    wizard_deploy_command_extn "$_need_sudo sudo ln -sf ${install_path}/vnet /usr/bin/vnet" || { return $_false; }
+    wizard_deploy_command_extn "$_need_sudo rm -f ${install_path}/install.failed" "remove empty file \"install.failed\"." || { return $_false; }
+    echo -e "\n● vnet module setup completed successfully.\n"
+
+    read -p "Do you want to setup the first vnet (virtual network) profile? [Y/n]?: " choice
+    [ "${choice}" = "Y" ] && { ${install_path}/vnet new; } || { echo -e "Ok, got it! You may create your first profile later by running command \"vnet new\"."; }
+
+    return $_true
+}
+
+wizard_deploy_uninstall_main(){
+    _check_exec_installed_dir || { return $_false; }
+    wizard_deploy_welcome
+    echo -e "Hi! It's sad to hear that you would want to uninstall vnet. Nevertheless, we respect your decision and walk you through to get vnet removed on your host machine.\nPlease follow the instructions as follows.\n"
+    echo -e "In short summary, what's going to happen:\n1. Stop vnet and its services.\n2. Remove file residue created by vnet outside the install directory.\n3. Remove/Reset/Restore configurations to the host machine for vnet usage.\n4. Remove all vnet modules (including profiles)\n"
+
+    read -p "Do you want to BACKUP all the vnet profile(s)? They will be removed during the uninstallation process. [Y/n]?: " choice
+    [ "${choice}" = "Y" ] && { 
+	_source_modules "profile.manager";
+        module_profile_export_main || { echo -e "E: Export profiles failed, uninstallation will not continue.."; return $_false; }
+     }
+
+    echo -e "\nLet's begin the formal uninstallation process..\n"
+    read -p "» To continue, enter Y. [Y/n] : " choice
+    [ "${choice}" = "Y" ] || { echo -e "» User choose to abort uninstallation."; return $_false; }
+    shared_root_rights_check_ask || { return $_false; }
+
+    [ -f ${topdir}/.installed ] && { . ${topdir}/.installed; } || { echo -e "E: Unable to process uninstallation request due to missing installation details."; return $_false; }
+    [ "${topdir}" == "${VIRNET_INSTALLED_PATH}" ] || { echo -e "E: Installation details fails integrity check, unable to continue."; return $_false; }
+    install_path="${topdir}"
+    ## Stop all running profiles ##
+    virtnetlist=( $(ls -1 "${profiledir}"  | grep -e "-vnet.conf" | cut -d "-" -f 1) )
+    for i in ${virtnetlist[@]}; do
+	echo -e "\tFound profile: \"${i}\", attempt to stop it and remove the profile's residue file(s).."
+	[ -f "${gbltmpdir}/vnet-${i}.network_up" ] && { $_need_sudo $install_path/vnet stop ${i}; } 
+	wizard_deploy_command_extn "$_need_sudo rm -f /etc/dnsmasq/vnet.*${i}" "remove dns binding residue file for vnet \"${i}\"."
+    done
+
+    ## Linux Security Manager (LSM) check
+    process_distro_lsm_type && { echo -e "I: LSM found for $DISTRO and is \"$lsm_type\"."; } || { echo -e "I: Either no LSM is installed or unknown LSM found for $DISTRO on this instance."; }
+    process_distro_lsm_polcies 0
+
+    ## Stopping and disabling vnet systemd
+    _vnet_svc_symlinked=$(ls -l /etc/systemd/system/vnet.service | awk -F  "-> " '/1/ {print $2}')
+    _vnet_symlinked=$(ls -l /usr/bin/vnet | awk -F  "-> " '/1/ {print $2}')
+    [ ${_vnet_svc_symlinked} == "$install_path/vnet.service" ] && { echo -e "\tStopping and Disabling vnet service."; $_need_sudo systemctl stop vnet.service; $_need_sudo systemctl disable vnet.service; } 
+    [ ${_vnet_symlinked} == "$install_path/vnet" ] && { $_need_sudo rm -f "${_vnet_symlinked}"; } 
+
+    wizard_deploy_command_extn "$_need_sudo rm -rf ${install_path}" "removing directory \"${install_path}\", subdirectories and files.." 
+
+    echo -e "Uninstallation done! Last but not least, we hope to see you again!"
+    return $_true
+}

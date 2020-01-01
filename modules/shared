@@ -1,0 +1,64 @@
+#!/bin/sh
+##Deploy Wizard module profile to be source/loaded when called by vnet
+[ "${0##*/}" == "${BASH_SOURCE[0]##*/}" ] && { exit 1; }
+[ "${0##*/}" == "vnet" ] || { exit 1; }
+
+## Keep this module file as simple as possible ##
+
+_need_sudo=""
+shared_root_rights_check_ask(){
+    #1 - Ask request friendly name
+    echo "Root access is required for "${1}", please provide when prompted."
+    echo "Note: This script will not work further if root rights are not granted."
+    sudo whoami 1>/dev/null 2>/dev/null && { _need_sudo="sudo" ; echo -e "I: Root access has been granted.\n"; return $_true; } ||  { _need_sudo=""; echo -e "E: Unable to get root access. Not going any further..\n"; return $_false; }
+
+}
+
+shared_root_ask_preexec(){
+    #1 - Friendly message of pre-execute of priv instruction
+    echo "Note: Root rights required for "${1}": "
+    [[ $@ == *'-y'* ]] && { noask=1; }
+    if [[ $noask != "1" ]]; then
+	  read -p "- Do you wish to continue? [Y/n]: " yesno
+	  case $yesno in
+		  [Y]*);;
+		  *) echo -e "[ \033[01;31mError\033[01;0m ] User abort! No changes has been made"; return $_false;;
+	  esac
+    fi
+    return $_true
+}
+
+question_loop_check_command(){
+    ## #1 - default value, #2 - "Prompt message", #3 - "check command to test", #4 - "error message", #5  - "reset count"
+    #echo ${1}, ${2}, ${3}, ${4}, ${5}
+    [ -n "${5}" ] && count=${5}
+    [ $count == 0 ] && { echo -e "» ${2}"; }
+    count=$(($count+1))
+    [ -n ${1} ] && choice="${1}"
+    read -p "  Your response: " -i $choice -e choice
+    choice="${choice/#\~/$HOME}"
+    [ ${3} "${choice}" ] || {
+            [ $count -ge 12 ] && { echo -e "Please don't try to be funny. I have enough of your nonsense!"; exit 1; }
+            echo -e "\tE: ${4}"; question_loop_check_command "${1}" "${2}" "${3}" "${4}";
+    }
+    [ "${choice}" == "${1}" ] && { return $_false; }    #So that it won't update the user input again
+    return $_true
+}
+
+
+question_loop_check_grep(){
+    ## #1 - default value, #2 - "Prompt message", #3 - "grep check mask", #4  - "reset count",
+    [ -n "${4}" ] && count=${4}
+    [ $count == 0 ] && { echo -e "» ${2}"; }
+    count=$(($count+1))
+    [ -n ${1} ] && choice="${1}"
+    read -p "  Your response: " -i $choice -e choice
+    choice="${choice/#\~/$HOME}"
+    $( echo "${choice}" | grep -qE "${3}"; ) || {
+            [ $count -ge 12 ] && { echo -e "Please don't try to be funny. I have enough of your nonsense!"; exit 1; }
+            echo -e "\tE: Invalid format, entered, please retry."; question_loop_check_grep "${1}" "${2}" "${3}";
+    }
+    [ "${choice}" == "${1}" ] && { return $_false; }    #So that it won't update the user input again
+    return $_true
+}
+

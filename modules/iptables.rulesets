@@ -1,0 +1,69 @@
+#!/bin/sh
+##iptables module profile to be source/loaded when called by vnet
+[ "${0##*/}" == "${BASH_SOURCE[0]##*/}" ] && { exit 1; }
+[ "${0##*/}" == "vnet" ] || { exit 1; }
+
+use_iptables_lock="-w"
+iptables -w -L -n > /dev/null 2>&1 || use_iptables_lock=""
+phys_iface=($(find /sys/class/net -type l -not -lname '*virtual*' -printf '%f\n'))
+
+_iptables_proc() {
+    choice=${1}
+    declare -A mode
+    mode[up-insert]="-I"
+    mode[up-append]="-A"
+    mode[down-insert]="-D"
+    mode[down-append]="-D"
+  
+    #Allow IPV4 DHCP (67) and DNS (53)#
+    iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p udp --dport 67 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p tcp --dport 67 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p udp --dport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p tcp --dport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    
+
+    if [ "${IS_ISOLATED_VIRNET}" = "true" ]; then
+        # IPV4 #
+        if [ -n "${VIRNET_IPV4_ADDR}" ] && [ -n "${VIRNET_IPV4_NETWORK}" ]; then
+            iptables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" -s "${VIRNET_IPV4_NETWORK}" ! -d "${VIRNET_IPV4_NETWORK}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+            iptables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" ! -s "${VIRNET_IPV4_NETWORK}" -d "${VIRNET_IPV4_NETWORK}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+            iptables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" -s "${VIRNET_IPV4_NETWORK}" -d "${VIRNET_IPV4_NETWORK}" -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+	    iptables "${use_iptables_lock}" "${mode[$choice-insert]}" FORWARD -i "${VIRNET_BRIDGE}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+	    iptables "${use_iptables_lock}" "${mode[$choice-insert]}" FORWARD -o "${VIRNET_BRIDGE}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+	    iptables "${use_iptables_lock}" "${mode[$choice-insert]}" FORWARD -i "${VIRNET_BRIDGE}" -s "${VIRNET_IPV4_NETWORK}" ! -d "${VIRNET_IPV4_NETWORK}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+	    iptables "${use_iptables_lock}" "${mode[$choice-insert]}" FORWARD -i "${VIRNET_BRIDGE}" -o "${VIRNET_BRIDGE}" -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+        else
+	    iptables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+        fi
+        # IPV6 #
+        if [ -n "${VIRNET_IPV6_ADDR}" ] && [ -n "${VIRNET_IPV6_NETWORK}" ]; then
+            ip6tables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" -s "${VIRNET_IPV6_NETWORK}" ! -d "${VIRNET_IPV6_NETWORK}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+            ip6tables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" ! -s "${VIRNET_IPV6_NETWORK}" -d "${VIRNET_IPV6_NETWORK}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+            ip6tables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" -s "${VIRNET_IPV6_NETWORK}" -d "${VIRNET_IPV6_NETWORK}" -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+            ip6tables "${use_iptables_lock}" "${mode[$choice-insert]}" FORWARD -i "${VIRNET_BRIDGE}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+            ip6tables "${use_iptables_lock}" "${mode[$choice-insert]}" FORWARD -o "${VIRNET_BRIDGE}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+            ip6tables "${use_iptables_lock}" "${mode[$choice-insert]}" FORWARD -i "${VIRNET_BRIDGE}" -o "${VIRNET_BRIDGE}" -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+        else
+            ip6tables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+        fi
+
+    else
+        iptables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" ! -s "${VIRNET_IPV4_NETWORK}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."	#Allow only VIRNET_IPV4_NETWORK 
+    	iptables $use_iptables_lock "${mode[$choice-insert]}" FORWARD -i ${VIRNET_BRIDGE} -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    	iptables $use_iptables_lock "${mode[$choice-insert]}" FORWARD -o ${VIRNET_BRIDGE} -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    	iptables $use_iptables_lock -t nat "${mode[$choice-append]}" POSTROUTING -s ${VIRNET_IPV4_NETWORK} ! -d ${VIRNET_IPV4_NETWORK} -j MASQUERADE -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    	iptables $use_iptables_lock -t mangle "${mode[$choice-append]}" POSTROUTING -o ${VIRNET_BRIDGE} -p udp -m udp --dport 68 -j CHECKSUM --checksum-fill  -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+        if [ -n "${VIRNET_IPV6_ADDR}" ] && [ -n "${VIRNET_IPV6_NETWORK}" ]; then
+	    ip6tables $use_iptables_lock "${mode[$choice-insert]}" FORWARD -i ${VIRNET_BRIDGE} -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    	    ip6tables $use_iptables_lock "${mode[$choice-insert]}" FORWARD -o ${VIRNET_BRIDGE} -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+	    ip6tables $use_iptables_lock -t nat "${mode[$choice-append]}" POSTROUTING -s ${VIRNET_IPV6_NETWORK} ! -d ${VIRNET_IPV6_NETWORK} -j MASQUERADE  -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+        else
+            ip6tables "${use_iptables_lock}" "${mode[$choice-insert]}" OUTPUT -o "${VIRNET_BRIDGE}" -j DROP -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    	fi
+
+    fi
+
+    return $_true
+}
+
+
