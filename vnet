@@ -1,6 +1,6 @@
 #!/usr/bin/bash -
 [ "${0##*/}" == "vnet" ] || { echo -e "This script shall be of filename \"vnet\" (w/o quotes)"; exit 1; }
-version="3.2.0"
+version="3.2.1"
 shell_script_info="Virtual Network (vnet) Kit ${version}"
 
 _false=1
@@ -26,7 +26,7 @@ _check_has_root(){
 }
 
 _check_exec_installed_dir(){
-    [ -f ${topdir}/.installed ] || { echo -e "E: Running vnet directly without installing is stricly disallowed!\n   Please run \"install\" command to begin installation process or \"upgrade\" to upgrade vnet installed on the host."; return $_false; }
+    [ -f ${topdir}/.installed ] || { echo -e "E: Running vnet directly without installing is stricly disallowed!\n   Please run \"install\" command to begin installation process or \"upgrade\" to upgrade vnet installed on the host.\n   Running vnet without arguments will show the list of commands available based on the mode the tool is running in."; return $_false; }
     . "${topdir}/.installed"
     [[ "${topdir}" == "${VIRNET_INSTALLED_PATH}" ]] || { echo -e "E: Running vnet directory without going through proper installation process is strictly disallowed!\n   Please re-run \"install\" command to re-run the installation process."; return $_false; }
     return $_true
@@ -63,6 +63,7 @@ _cidr2netmask(){
 }
 
 _init_profile_generated_variables(){
+    #Only applies to start()
     VIRNET_DHCP_CONFILE="${profiledir}/${VIRNET_BRIDGE}-vnet-dnsmasq.conf"
     VIRNET_IPV4_MAX_HOST=$(( 2**(32-"${VIRNET_IPV4_NETWORK##*/}") -3 ))
     [ ${VIRNET_IPV4_STATIC_HOST_COUNT} -le ${VIRNET_IPV4_MAX_HOST} ] && { VIRNET_IPV4_DHCP_MAX=$(( ${VIRNET_IPV4_MAX_HOST} - ${VIRNET_IPV4_STATIC_HOST_COUNT} )); } || {  VIRNET_IPV4_DHCP_MAX=${VIRNET_IPV4_MAX_HOST}; }
@@ -135,6 +136,9 @@ _vethadapter_up(){
 
 
 start(){
+    # Generate other Profile required variables
+    _init_profile_generated_variables
+
     [ "x$USE_THIS_PROFILE" = "xtrue" ] || { echo -e "This profile \"${VIRNET_BRIDGE}\" has been disabled." return $_true; }
 
     [ ! -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo "${VIRNET_BRIDGE} is already running"; return $_false; }
@@ -262,10 +266,6 @@ precheck(){
 #echo "$USE_THIS_PROFILE, $VIRNET_BRIDGE, $VIRNET_BRIDGE_MAC, $VIRNET_IPV4_ADDR, $VIRNET_IPV4_NETWORK, $VIRNET_IPV4_DHCP_RANGE, $VIRNET_IPV4_DHCP_MAX, $VIRNET_DHCP_CFGFILE, $VIRNET_IPV4_DHCP_PING, $VIRNET_DOMAIN, $VIRNET_IPV6_ADDR, $VIRNET_IPV6_NETWORK"
 #exit 0;
 
-    # Generate other Profile required variables
-    _init_profile_generated_variables
-
-
     case "$1" in
     	start)
 	    start
@@ -322,12 +322,12 @@ case "$1" in
 	module_profile_new_main "edit"
     ;;
 
-    export|export-profile|-ep)
+    export|export-profile|-exp)
 	_source_modules "profile.manager"
         module_profile_export_main
     ;;
 
-    import|import-profile|-ip)
+    import|import-profile|-imp)
 	_source_modules "profile.manager"
         module_profile_import_main
     ;;
@@ -352,6 +352,11 @@ case "$1" in
 	module_profile_listings_main
     ;;
 
+    macgen)
+	_source_modules "profile.manager"
+	module_profile_macgen_main
+    ;;
+
     install)
 	_source_modules "deploy.wizard"
 	wizard_deploy_install_main
@@ -367,19 +372,50 @@ case "$1" in
 	wizard_deploy_upgrade_main
     ;;
 
+    --show-change-log)
+	[ -f ${topdir}/CHANGELOG ] && cat ${topdir}/CHANGELOG
+    ;;
+
+    --show-install-dir)
+	_check_exec_installed_dir && { echo -e "vnet tool is installed in: \"${topdir}\"."; }
+    ;;
+
     version|-v)
         echo $shell_script_info
     ;;
 
     *)
         echo -e $shell_script_info
-	echo -e "Initial setup on the host system required: Run \"${0} install\" to start the installation process.\nTo remove this kit, run \"${0} uninstall\".\n"
-	echo -e "Run \"${0} {list|status} to list the profile(s) and its status on the host system. If the list is empty, you may want to create a new profile by running \"${0} new\"."
-	echo -e "\nSome commonly used commands:"
-	echo -e "\t${0} {list|status|-v|version}"
-        echo -e "\t${0} {start|stop|restart|reload|restart-dhcp|force-reload|new|export|import|rename|delete|version} virtual_network_name"
-        echo -e "\nYou may refer to ${topdir}/CHANGELOG file for the list of changes."
-        exit 2
+	_check_exec_installed_dir &>/dev/null && { _exec_mode="Tool"; } || { _exec_mode="Package"; }
+	echo -e "Running vnet as ${_exec_mode} mode.\n"
+	_check_exec_installed_dir &>/dev/null && { echo -e "vnet has been installed on this machine, to remove this kit, run command \"uninstall\".\n"; } || 
+		{ echo -e "Initial setup on the host system required: Run command \"install\" to start the installation process."; }
+	echo -e "\nList of Commands available"
+	echo -e "============================"
+	echo -e "  ▪ For ALL modes:\n"
+	echo -e "\tmacgen \n\t\tRandomly generates an unicast MAC Address.\n"
+	echo -e "\tversion, -v \n\t\tDisplay version information.\n"
+	echo -e "\t--show-change-log \n\t\tDisplays CHANGELOG information on terminal.\n"
+        echo -e "  ▪ For Tool mode:\n"
+	echo -e "\tlist, status,-l \n\t\tList Profile(s) Information and Status.\n"
+        echo -e "\tstart <profile_name> \n\t\tStart virtual network of profile name.\n"
+        echo -e "\tstop <profile_name> \n\t\tStop virtual network of profile name.\n"
+        echo -e "\trestart, reload <profile_name> \n\t\tRestart virtual network of profile name.\n"
+	echo -e "\tforce-reload <profile_name> \n\t\tRestart (force) virtual network of profile name. Use it when restart/reload does not work.\n"
+	echo -e "\trestart-dhcp, -rd <profile_name> \n\t\tRestart DHCP service for the profile name (virtual network). Use it when changes has been made to dnsmasq.\n"
+	echo -e "\tnew, new-profile, -np \n\t\tCreates a new profile.\n"
+	echo -e "\tedit, edit-profile, -ep \n\t\tEdits an existing profile.\n"
+	echo -e "\texport, export-profile, -exp \n\t\tExports an existing profile.\n"
+	echo -e "\timport, import-profile, -imp \n\t\tImports an existing profile.\n"
+	echo -e "\tdelete, delete-profile, -dp \n\t\tDeletes an existing profile.\n"
+	echo -e "\trename, rename-profile, -rp <profile_name> <new_profile_name> \n\t\tRenames an existing profile.\n"
+	echo -e "\tedit-dhcp-config, -edc <profile_name> \n\t\tEdits dhcp config for the profile.\n"
+	echo -e "\tuninstall \n\t\tUninstalls and removes vnet from the host.\n"
+	echo -e "\t--show-install-dir \n\t\tDisplays the path where vnet tool is installed in.\n"
+	echo -e "  ▪ For Package mode:\n"
+	echo -e "\tinstall \n\t\tInstalls and setup vnet on the host.\n"
+	echo -e "\tupgrade \n\t\tUpgrades vnet with a newer version (if applicable).\n"
+	exit 2
 esac
 
 exit $?

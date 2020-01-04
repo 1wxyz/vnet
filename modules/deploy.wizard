@@ -7,13 +7,6 @@
 wizard_dir_install_default="/opt/vnet"
 wizard_dir_usr_bin="/usr/bin"
 
-wizard_deploy_command_extn(){
-    # $1 - command, $2 - short desc of command
-    cmd="${1}"
-    echo -e "Executing command \"$cmd\", "${2}"."
-    ${cmd} && { echo -e "[Done]\n"; return $_true; } || { echo -e "E: Fails to execute the above command.\n"; return $_false; }
-}
-
 _get_systemd_wrapper_config(){
 echo -e "## DO NOT REMOVE THIS FILE MANUALLY. Run command \"vnet uninstall\" and follow the onscreen instructions ##
 ## To know the status of this service, run command \"systemctl <options> vnet.service\" for diagnose service status. ##
@@ -22,8 +15,6 @@ echo -e "## DO NOT REMOVE THIS FILE MANUALLY. Run command \"vnet uninstall\" and
 Description=Virtual Network Auto Processor
 After=network-online.target
 Wants=network-online.target
-#Documentation=man:lxd(1)
-#Before=lxd.service
 
 [Service]
 Type=oneshot
@@ -138,30 +129,39 @@ wizard_deploy_upgrade_main(){
     elif [[ ${_tmp_status} == 2 ]]; then
 	    echo -e "Packaged version is older than installed version, skipping."; return $_false;
     elif [[ ${_tmp_status} == 3 ]]; then
-	    echo -e "It's still the same version, we will have new releases soon :)"; return $_false;
+	    echo -e "It's still the same version, we will have new releases soon :)"; 
+	    read -p "However, we still allows the installed copy to be overwritten (reinstallation) with the package copy if you want (Y to reinstalls). [Y/n]: " choice
+	    [ "${choice}" = "Y" ] && { echo -e "I: Proceed with reinstallation"; } || { echo -e "No worries, nothing has been replaced."; return $_false; }
     fi
 
     has_fault=0
 
+    _vnetsvc_chksum_pkg=$( _get_systemd_wrapper_config | sha256sum | cut -d " " -f 1 )
+    _vnetsvc_chksum_installed=$( sha256sum ${install_path}/vnet.service 2>/dev/null | cut -d " " -f 1 )
+
     echo -e "\nvnet performs upgrade by replacing the main vnet file, modules if the forcibly.\nProfile(s) files in profiles directory will only be modified with changes so that it will work with the updated version of vnet.\nexec directory belongs to runtime file and will not be touched."
     
     echo -e "\nChanges to file system will begin here...\n"
-    read -p "» To continue, enter Y. [Y/n] : " choice
-    [ "${choice}" = "Y" ] || { echo -e "» User choose to abort vnet upgrade. No changes made to the host's filesystem, yet! =)"; return $_false; }
+    [ "${choice}" = "Y" ] || { 
+    	read -p "» To continue, enter Y. [Y/n] : " choice
+    	[ "${choice}" = "Y" ] || { echo -e "» User choose to abort vnet upgrade. No changes made to the host's filesystem, yet! =)"; return $_false; }
+    }
     shared_root_rights_check_ask || { return $_false; }
 
     ## Stage 1 - replace files ##
     cd ${0%%/*}
     wizard_deploy_command_extn "$_need_sudo cp -rf vnet modules CHANGELOG ${install_path}" "Replacing main module (vnet) and modules." || { echo -e "E: Fails to replace files required for the upgrade."; has_fault=1; }
-    _get_systemd_wrapper_config | $_need_sudo tee "${install_path}/vnet.service" &>/dev/null && \
+
+    [ "${_vnetsvc_chksum_pkg}" == "${_vnetsvc_chksum_installed}" ] && { echo -e "I: No changes to vnet.service file."; } || {	
+	_get_systemd_wrapper_config | $_need_sudo tee "${install_path}/vnet.service" &>/dev/null && \
 	wizard_deploy_command_extn "$_need_sudo systemctl daemon-reload" "Reload systemd units to allow new vnet.service file loaded to runtime.." || \
 	{ echo -e "E: Error performing daemon file update/reload."; has_fault=1; }
-    
-
+    }     
     ## Stage 2 - Patch profiles ##
     # Not required at this stage
 
     [ ${has_fault} == 1 ] && { echo "W: One or more error(s) has occured! Upgrade unsuccessful and vnet may not work on next start/restart."; return $_false; }
+    echo -e "\nI: Successfully upgraded/reinstalled vnet from ${installed_ver} to ${version}.\n" 
 
     return $_true
 }

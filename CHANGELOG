@@ -1,28 +1,43 @@
-!! CHANGE LOG !!
+CHANGELOG
+=========
+
+Version 3.2.1
+Release Date: 4 Jan 2020
+1.  Feature: Upgrade command: Only replace vnet.service file if checksum is different, and will be replaced with package version.
+2.  Bugfix: MAC Address should not generate multicast address.
+3.  Bugfix: Check profile file exist location syntax error.
+4.  Feature: Random unicast MAC address generator menu ("vnet macgen").
+5.  Bugfix: DHCP max host count won't be processed if profile is processed via systemd.
+6.  Feature: Executing vnet without any argument(s) will display the instance of vnet running as Package or Tool mode.
+    Package Mode: Usually downloaded from a remote repo or a zip package file and vnet is not installed onto the host
+    Tool Mode: vnet script has been installed onto the host and is running from the directory registered during the setup/install process.
+7.  Feature: Display list of commands available, categorized into its availabilty modes (ALL/Tool/Package).
+8.  Bugfix: Some logic fixes for new/edit profile and upgrade commands.
+9.  Feature: Allows reinstallation request if Package ver/mode is the same as Tool ver/mode.
+10. Feature: Added command arguments --show-install-dir and --show-change to display the featured information on terminal screen.
+    Details/Description of these new command arguments are described in the "list of commands available".
+11. Adds a file VERSION_INFO to the exported archived with stores the version number of the tool that was used to export the profiles.
 
 Version 3.2.0
 Release Date: 1 Jan 2020
-1. Introduction of deploy wizard, to handle installation, uninstallation and upgrade requests. Upgrade feature will be implemented soon.
-2. Introduction of creating of new vnet profile via command 'vnet new' instead of manually configuration.
-3. Introduction of editing of vnet profile via command 'vnet edit' instead of manually configuration.
-4. Allows export/backup and import/restore of profile(s). 
+Initial Public Release
+1.  Introduction of deploy wizard, to handle installation, uninstallation and upgrade requests. Upgrade feature will be implemented soon.
+2.  Introduction of creating of new vnet profile via command 'vnet new' instead of manually configuration.
+3.  Introduction of editing of vnet profile via command 'vnet edit' instead of manually configuration.
+4.  Allows export/backup and import/restore of profile(s). 
 
-Version 3.0.3
-Release Date: 6 Jun 2019
-1. Move network up empty file from exec dir to host system global temp ("/tmp") directory.
-2. Introduction of modules directory, which currently has iptables, network tap and profile manager modules.
-3. Rename config dir to profiles and thus officially supports multiple vnet(s)/bridge(s).
-4. Introduction of profile manager module to allow listing of all vnet profiles, rename, delete and edit dnsmasq settings of vnet profile.
-5. Introduction of iptables rulesets module and currently has 2 modules, bridge or isolated rulesets. Previously, rules are defined inside vnet main script file.
-
-
-Version 2.2.0
-Release Date: 29 May 2019
-1.  Virtual Network here refers to bridge and vice-versa. In this documentation, virtual network shall be used instead
-2.  All virtual network creation are based on config file instead of depending on both config and the shell script
-3.  Shell Script is now a common platform to manage virtual network creation based on the name defined in the config file
+Version 3.1.9 and before:
+(latest changes listed first)
+1.  Move network up empty file from exec dir to host system global temp ("/tmp") directory.
+2.  Introduction of modules directory, which currently has iptables, network tap and profile manager modules.
+3.  Rename config dir to profiles and thus officially supports multiple vnet(s)/bridge(s).
+4.  Introduction of profile manager module to allow listing of all vnet profiles, rename, delete and edit dnsmasq settings of vnet profile.
+5.  Introduction of iptables rulesets module and currently has 2 modules, bridge or isolated rulesets. Previously, rules are defined inside vnet main script file.
+6.  Virtual Network here refers to bridge and vice-versa. In this documentation, virtual network shall be used instead
+7.  All virtual network creation are based on config file instead of depending on both config and the shell script
+8.  Shell Script is now a common platform to manage virtual network creation based on the name defined in the config file
     and thus, the shell script is now renamed as vnet ( instead of the <virtualnetworkname>-net or <bridgename>-net )
-4.  All Config (.conf) files related to virtual network setup are to be stored in configstore dir located in where the shell script "vnet" is located
+9.  All Config (.conf) files related to virtual network setup are to be stored in configstore dir located in where the shell script "vnet" is located
     a.  VirtualNet config files has a standard convention to comply with:
             i.e. <virtualnetworkname>-vnet.conf and only one such VirtualNet config file per each virtual network name is allowed.
             (for example, virtual network name virtnet will have the following filename virnet-vnet.conf
@@ -33,13 +48,13 @@ Release Date: 29 May 2019
     d.  Currently only dnsmasq application used by this application requires a config file.
         More applications that requires config file may be introduced in future.
     e.  Future improvement will include auto generation of <virtualnetworkname>-vnet.conf. Stay tuned.
-5.  In order for vnet shell script to work, the following config files is required. This list will change the script improves with more features.
+10. In order for vnet shell script to work, the following config files is required. This list will change the script improves with more features.
     a.  <virtualnetworkname>-vnet.conf
     b   <virtualnetworkname>-vnet-dnsmasq.conf
-6.  VirtualNet config file new variable `PERSISTENT="false"` has been added from version 2.1.1 and above
+11.  VirtualNet config file new variable `PERSISTENT="false"` has been added from version 2.1.1 and above
     This is implemented together with systemd (service) script "vnet.service" and autoproc script "vnet-autoproc" for use with the service script.
     If PERSISTENT="true", the vnet systemd (service) script will auto setup the virtual network interface the way how the user manually executes it.
-7.  Manage of virtual network during system startup and shutdown using systemd
+12.  Manage of virtual network during system startup and shutdown using systemd
     Setup Instructions for systemd are mentioned at the beginning of "vnet.service" file.
     a.  Auto configuration of Virtual Network Adapters/Interfaces based on the value of PERSISTENT variable inside VirtualNet config files
         If PERSISTENT="true" in <virtualnetworkname>-vnet.conf, the <virtualnetworkname> will be automatically configured on startup.
@@ -48,33 +63,10 @@ Release Date: 29 May 2019
     b.  Auto deletion of Virtual Network Adapters/Intefaces on system shutdown. 
         All <virtualnetworkname>-vnet.conf inside configstore directory will be automatically processed regardless of status.
         (i.e. Even if the <virtualnetworkname> is not setup automatically or manually by the user, it will be processed as well)
-8.  Version 2.2.0 addition (2018 Apr 24)
+13.  Version 2.2.0 addition (2018 Apr 24)
     a.  Add dnsmasq global exclude file /etc/dnsmasq.d-available/vnet-<virtualnetworkname> and 
         symlink to /etc/dnsmasq.d-available/vnet-<virtualnetworkname> from /etc/dnsmasq.d/
     b.  Auto delete vnet-<virtualnetworkname> symlink and file on shutdown (or on stop request)
 
 
-
-@@@@ NOTES FOR OLDER VERSION (VERSION 2.0.x and below) @@@@
-@@@@ WARNING!! NOTES FOR VERSION 2.0.x and below does not apply to Version 2.1 and Above. @@@@
-
-!! This NOTE (file) shall ALWAYS stay in this directory where files research-net, dnsmasq.conf, research-net.conf are in !! 
-This is V2 of research isolated virtual bridge (research) with virtual interface (research-veth)
-Setup with the use of LXD Bridge library retrieved from LXD version below <= 2.0.x
-As this machine has been upgraded to version 2.2.*, thus the config files are available in this dir "references" with filename "lxd-bridge files pre2.3.zip"
-****
-
-1. There is a directory named "@archived" which will contains all the older versions to use/run incase of emergency or for reference use.
-Label the version with V* (e.g. Version 1 shall be V1 and Version 1.2 shall be V1.2)
-
-1. In case dnsmasq doesn't work even with research-veth bridged to research interface
-Create a file and place the text inside "Contents" section below to /etc/dnsmasq.d/research
-==== Contents below here ====
-# Tell any system-wide dnsmasq instance to make sure to bind to interfaces
-# instead of listening on 0.0.0.0
-# WARNING: changes to this file will get lost if lxc is removed.
-bind-interfaces
-except-interface=research
-==== Contents above here ====
-
-END OF CHANGE LOG
+== END ==

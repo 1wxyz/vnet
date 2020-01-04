@@ -151,7 +151,7 @@ __mac_generator(){
     _mac_rand=$(dd if=/dev/urandom bs=1 count=6 2>/dev/null )
     _mac_rand=($(echo -n ${_mac_rand[@]} | xxd -p | sed 's/.\{2\}/& /g'))
     [ ${#_mac_rand[@]} -ne 6 ] && __mac_generator
-    _mac_rand[0]=$(( 16#${_mac_rand[0]} | 0x02 & 0xFE )) 
+    _mac_rand[0]=$(( ( 16#${_mac_rand[0]} | 0x02 ) & 0xFE ))
     _mac_rand[0]=$( printf "%02x" ${_mac_rand[0]} )
     _mac_rand=$(echo ${_mac_rand[@]} | sed 's/ /:/g')
     cat /sys/class/net/*/address | grep "$_mac_rand" &>/dev/null && { echo "I: MAC Address used by this system, regenerating.."; __mac_generator; }
@@ -297,6 +297,11 @@ question_proc_network_answers(){
     return $_true
 }
 
+module_profile_macgen_main(){
+    __mac_generator
+    return $_true
+}
+
 module_profile_listings_main(){
 	_check_exec_installed_dir || { return $_false; }
         echo $shell_script_info
@@ -365,7 +370,7 @@ module_profile_new_main(){
 	## vnet required questions
 	if [ "$_opn_type" == "new" ]; then
 		question_loop_check_grep "${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}" "I need to know the name of the bridge (vnet) aka profile name, please give it a name." "${grep_virnet_name}" 0 && { profile_params["0.1-MAIN--VIRNET_BRIDGE"]="${choice}"; }
-		grep -qR "VIRNET_BRIDGE=\"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"" ./profiles/*-vnet.conf && { 
+		grep -qR "VIRNET_BRIDGE=\"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"" ${topdir}/profiles/*-vnet.conf && { 
 			echo -e "\nE: Profile with the name \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\" exists!\nNo worries, we will thus proceed to load the configuration and process them as edit mode.\n";
        			_opn_type="edit"
 			module_profile_read_config
@@ -373,9 +378,8 @@ module_profile_new_main(){
 		}
 	elif [ "$_opn_type" == "edit" ]; then
 		question_loop_check_grep "${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}" "I need to know the name of the bridge (vnet) aka profile name, so that I can read the profile config file." "${grep_virnet_name}" 0 && { profile_params["0.1-MAIN--VIRNET_BRIDGE"]="${choice}"; }
-		grep -qR "VIRNET_BRIDGE=\"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"" ./profiles/*-vnet.conf || { echo -e "\nE: Profile with the name \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\" does not exist!\nNo worries, we will thus proceed to create a new profile using this profile name \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"..\n"
-		_opn_type="new"; 
-		} && { module_profile_read_config; }
+		grep -qR "VIRNET_BRIDGE=\"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"" ${topdir}/profiles/*-vnet.conf && { module_profile_read_config; } || 
+			{ echo -e "\nE: Profile with the name \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\" does not exist!\nNo worries, we will thus proceed to create a new profile using this profile name \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"..\n"; _opn_type="new"; }
 	fi
 
 	question_loop_check_grep "${profile_params["0.2-MAIN--PERSISTENT"]}" "Run this bridge/profile automatically on every system startup? [true/false] " "${grep_match_true_false}" 0 && { profile_params["0.2-MAIN--PERSISTENT"]="${choice}"; } 
@@ -536,11 +540,12 @@ module_profile_export_main(){
     _backup_filename="vnet-profiles-backup-${_ts}.zip"
     echo -e "Backup file will be \"${_backup_filename}\" and will be stored in \"${_backup_path}\"."
     mkdir /tmp/vnet-backup-${_ts}
+    echo "${version}" > /tmp/vnet-backup-${_ts}/VERSION_INFO
     cd ${profiledir}
     sha256sum * > /tmp/vnet-backup-${_ts}/CHECKSUM_BACKUP
     zip -9 ${_backup_path}/${_backup_filename} *
     cd /tmp/vnet-backup-${_ts}
-    zip -9 ${_backup_path}/${_backup_filename} CHECKSUM_BACKUP
+    zip -9 ${_backup_path}/${_backup_filename} CHECKSUM_BACKUP VERSION_INFO
     rm -rf /tmp/vnet-backup-${_ts}
     cd "${_store_call_dir}" && unset _store_call_dir
 

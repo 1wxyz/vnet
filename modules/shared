@@ -14,18 +14,11 @@ shared_root_rights_check_ask(){
 
 }
 
-shared_root_ask_preexec(){
-    #1 - Friendly message of pre-execute of priv instruction
-    echo "Note: Root rights required for "${1}": "
-    [[ $@ == *'-y'* ]] && { noask=1; }
-    if [[ $noask != "1" ]]; then
-	  read -p "- Do you wish to continue? [Y/n]: " yesno
-	  case $yesno in
-		  [Y]*);;
-		  *) echo -e "[ \033[01;31mError\033[01;0m ] User abort! No changes has been made"; return $_false;;
-	  esac
-    fi
-    return $_true
+wizard_deploy_command_extn(){
+    # $1 - command, $2 - short desc of command
+    cmd="${1}"
+    echo -e "Executing command \"$cmd\", "${2}"."
+    ${cmd} && { echo -e "[Done]\n"; return $_true; } || { echo -e "E: Fails to execute the above command.\n"; return $_false; }
 }
 
 question_loop_check_command(){
