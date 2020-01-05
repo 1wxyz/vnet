@@ -15,7 +15,7 @@ _tapadapter_down(){
 
 _tapadapter_up(){
     ip tuntap add mode tap "${VIRNET_BRIDGE}-tap"
-    ip link set "${VIRNET_BRIDGE}-tap" address ${VIRNET_BRIDGE_TAP_MAC} master "${VIRNET_BRIDGE}" up
+    ip link set "${VIRNET_BRIDGE}-tap" address ${VIRNET_BRIDGE_TAP_MODULE_MAC} master "${VIRNET_BRIDGE}" up
     return $_true
 }
 

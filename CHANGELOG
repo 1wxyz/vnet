@@ -1,6 +1,13 @@
 CHANGELOG
 =========
 
+Version 3.2.2
+Release Date: 5 Jan 2020
+1.  Bugfix: Typo in variable pointing dnsmasq config file.
+2.  Bugfix: Profile should be able to be stopped if its running even if USE_THIS_PROFILE is set to false after it is started.
+3.  Bugfix: Fix unreferenced variable on network TAP script module.
+4.  Tidying up of vnet main script.
+
 Version 3.2.1
 Release Date: 4 Jan 2020
 1.  Feature: Upgrade command: Only replace vnet.service file if checksum is different, and will be replaced with package version.

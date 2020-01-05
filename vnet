@@ -1,6 +1,6 @@
 #!/usr/bin/bash -
 [ "${0##*/}" == "vnet" ] || { echo -e "This script shall be of filename \"vnet\" (w/o quotes)"; exit 1; }
-version="3.2.1"
+version="3.2.2"
 shell_script_info="Virtual Network (vnet) Kit ${version}"
 
 _false=1
@@ -14,8 +14,6 @@ modulesdir="${topdir}/modules"
 execrundir="${topdir}/exec"	#varrun
 execlibdir="${topdir}/exec"	#varlib
 gbltmpdir="/tmp"
-
-config="${profiledir}/${2}-vnet.conf"
 
 
 #### ALL FUNCTIONS STARTS HERE ####
@@ -64,7 +62,7 @@ _cidr2netmask(){
 
 _init_profile_generated_variables(){
     #Only applies to start()
-    VIRNET_DHCP_CONFILE="${profiledir}/${VIRNET_BRIDGE}-vnet-dnsmasq.conf"
+    VIRNET_DHCP_CFGFILE="${profiledir}/${VIRNET_BRIDGE}-vnet-dnsmasq.conf"
     VIRNET_IPV4_MAX_HOST=$(( 2**(32-"${VIRNET_IPV4_NETWORK##*/}") -3 ))
     [ ${VIRNET_IPV4_STATIC_HOST_COUNT} -le ${VIRNET_IPV4_MAX_HOST} ] && { VIRNET_IPV4_DHCP_MAX=$(( ${VIRNET_IPV4_MAX_HOST} - ${VIRNET_IPV4_STATIC_HOST_COUNT} )); } || {  VIRNET_IPV4_DHCP_MAX=${VIRNET_IPV4_MAX_HOST}; }
 }
@@ -100,7 +98,7 @@ _setup_dhcp_server(){
     fi
 
     # https://lists.linuxcontainers.org/pipermail/lxc-devel/2014-October/010561.html
-    for DNSMASQ_USER in vnet-dnsmasq nobody dnsmasq nobody
+    for DNSMASQ_USER in vnet-dnsmasq nobody
     do
         if getent passwd ${DNSMASQ_USER} >/dev/null; then
             break
@@ -139,7 +137,7 @@ start(){
     # Generate other Profile required variables
     _init_profile_generated_variables
 
-    [ "x$USE_THIS_PROFILE" = "xtrue" ] || { echo -e "This profile \"${VIRNET_BRIDGE}\" has been disabled." return $_true; }
+    [ "x$USE_THIS_PROFILE" = "xtrue" ] || [ -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo -e "This profile \"${VIRNET_BRIDGE}\" has been disabled."; return $_true; }
 
     [ ! -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo "${VIRNET_BRIDGE} is already running"; return $_false; }
 
@@ -197,12 +195,12 @@ start(){
 }
 
 stop(){
-    [ "x$USE_THIS_PROFILE" = "xtrue" ] || { return $_true; }
+    [ "x$USE_THIS_PROFILE" = "xtrue" ] || [ -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || [ "$1" = "force" ] || { return $_true; }
 
     [ -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || [ "$1" = "force" ] || { echo "${VIRNET_BRIDGE} isn't running";  
 	{ [[ "${PPID}" == "1" ]] && return $_true || return $_false; } }
 
-    [ -d /sys/class/net/${VIRNET_BRIDGE}-tap ] && { _source_modules "network.tap" && tapadapter_down; }
+    [ -d /sys/class/net/${VIRNET_BRIDGE}-tap ] && { _source_modules "network.tap" && _tapadapter_down; }
     if [ -d /sys/class/net/${VIRNET_BRIDGE} ]; then
         _ifdown
         #_iptables_down
@@ -253,9 +251,12 @@ daemon_fetch_list_virtualnetworks(){
 
 ## Pre-Execution Check ##
 precheck(){
+    # Handles start, stop, reload, force-reload requests.
+    config="${profiledir}/${2}-vnet.conf"
+
     _check_exec_installed_dir || { return $_false; }
     _check_has_root || { echo -e $_msg_need_root; return $_false; }
-    [ ! "${2}" ] && { echo -e "!!ERROR!! Please provide a virtual network name!\nFor Example to create network \"test\", the command shall be: \n${0} {start|stop|restart|reload|force-reload|list|listconfig} test"; return $_false; }
+    [ ! "${2}" ] && { echo -e "!!ERROR!! Please provide a virtual network profile name!\nFor Example to create a vnet profile \"test\", the command shall be: \nvnet new test\nRun vnet without any arguments to get a list of commands available."; return $_false; }
 
 
     # Check if config file exist and attempt to load config file
