@@ -1,6 +1,6 @@
 #!/usr/bin/bash -
 [ "${0##*/}" == "vnet" ] || { echo -e "This script shall be of filename \"vnet\" (w/o quotes)"; exit 1; }
-version="3.2.2"
+version="3.2.3"
 shell_script_info="Virtual Network (vnet) Kit ${version}"
 
 _false=1
@@ -14,6 +14,7 @@ modulesdir="${topdir}/modules"
 execrundir="${topdir}/exec"	#varrun
 execlibdir="${topdir}/exec"	#varlib
 gbltmpdir="/tmp"
+gbltmpvnetdir="${gbltmpdir}/vnet-tmp"
 
 
 #### ALL FUNCTIONS STARTS HERE ####
@@ -137,9 +138,9 @@ start(){
     # Generate other Profile required variables
     _init_profile_generated_variables
 
-    [ "x$USE_THIS_PROFILE" = "xtrue" ] || [ -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo -e "This profile \"${VIRNET_BRIDGE}\" has been disabled."; return $_true; }
+    [ "x$USE_THIS_PROFILE" = "xtrue" ] || [ -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo -e "This profile \"${VIRNET_BRIDGE}\" has been disabled."; return $_true; }
 
-    [ ! -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo "${VIRNET_BRIDGE} is already running"; return $_false; }
+    [ ! -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo "${VIRNET_BRIDGE} is already running"; return $_false; }
 
     if [ -d /sys/class/net/${VIRNET_BRIDGE} ]; then
         stop force || $_true
@@ -188,16 +189,16 @@ start(){
 
     _setup_dhcp_server || cleanup
 
-
-    touch "${gbltmpdir}"/vnet-${VIRNET_BRIDGE}.network_up
+    [ -d ${gbltmpvnetdir} ] || { mkdir -p ${gbltmpvnetdir}; }
+    touch "${gbltmpvnetdir}"/vnet-${VIRNET_BRIDGE}.network_up
     printf "${VIRNET_BRIDGE} started successfully.\n"
     FAILED=0
 }
 
 stop(){
-    [ "x$USE_THIS_PROFILE" = "xtrue" ] || [ -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || [ "$1" = "force" ] || { return $_true; }
+    [ "x$USE_THIS_PROFILE" = "xtrue" ] || [ -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || [ "$1" = "force" ] || { return $_true; }
 
-    [ -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || [ "$1" = "force" ] || { echo "${VIRNET_BRIDGE} isn't running";  
+    [ -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || [ "$1" = "force" ] || { echo "${VIRNET_BRIDGE} isn't running";  
 	{ [[ "${PPID}" == "1" ]] && return $_true || return $_false; } }
 
     [ -d /sys/class/net/${VIRNET_BRIDGE}-tap ] && { _source_modules "network.tap" && _tapadapter_down; }
@@ -211,7 +212,7 @@ stop(){
         # if $VIRNET_BRIDGE has attached interfaces, don't destroy the bridge, unless it is called by systemd stop command
 	[[ "${PPID}" != "1" ]] && { ls /sys/class/net/${VIRNET_BRIDGE}/brif/* > /dev/null 2>&1 || ip link delete ${VIRNET_BRIDGE}; } || { ip link delete ${VIRNET_BRIDGE}; }
     fi
-    rm -f "${gbltmpdir}"/vnet-${VIRNET_BRIDGE}.network_up
+    rm -f "${gbltmpvnetdir}"/vnet-${VIRNET_BRIDGE}.network_up
     rm -f "${execlibdir}"/${VIRNET_BRIDGE}.dnsmasq.leases
     printf "${VIRNET_BRIDGE} stopped successfully.\n"
 }
@@ -219,8 +220,8 @@ stop(){
 restart_dhcp_server(){
     echo "Restart DHCP Server Feature"
     echo "==========================="
-    [ ! -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] && { echo "Couldn't restart DHCP server for \"${VIRNET_BRIDGE}\" network as it is not up/running. Exiting.."; return $_false; }
-    i_dhcppid=$([ ! -f "${gbltmpdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { cat "${execrundir}/${VIRNET_BRIDGE}.dnsmasq.pid"; } )
+    [ ! -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] && { echo "Couldn't restart DHCP server for \"${VIRNET_BRIDGE}\" network as it is not up/running. Exiting.."; return $_false; }
+    i_dhcppid=$([ ! -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { cat "${execrundir}/${VIRNET_BRIDGE}.dnsmasq.pid"; } )
     [ -n $i_dhcppid ] &&  [[ $(grep -E "${VIRNET_BRIDGE}.*dnsmasq"  /proc/$i_dhcppid/cmdline) ]] && { 
 	echo -e "Existing DHCP (dnsmasq) process for \"${VIRNET_BRIDGE}\" found with PID:$i_dhcppid will be terminated.";
     	kill -9 $i_dhcppid || { echo -e "Unable to terminate dnsmasq PID:$i_dhcppid, exiting.."; return $_false; }

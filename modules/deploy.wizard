@@ -239,7 +239,7 @@ wizard_deploy_uninstall_main(){
     virtnetlist=( $(ls -1 "${profiledir}"  | grep -e "-vnet.conf" | cut -d "-" -f 1) )
     for i in ${virtnetlist[@]}; do
 	echo -e "\tFound profile: \"${i}\", attempt to stop it and remove the profile's residue file(s).."
-	[ -f "${gbltmpdir}/vnet-${i}.network_up" ] && { $_need_sudo $install_path/vnet stop ${i}; } 
+	[ -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { $_need_sudo $install_path/vnet stop ${i}; } 
 	wizard_deploy_command_extn "$_need_sudo rm -f /etc/dnsmasq/vnet.*${i}" "remove dns binding residue file for vnet \"${i}\"."
     done
 

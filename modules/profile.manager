@@ -310,10 +310,10 @@ module_profile_listings_main(){
 	echo -e "( Legend: NAME ; START TYPE ; STATE; IPV4 ; IPV6 ; DHCP PID )"
 	_profilename=($(ls -1 ${profiledir}  | grep -e "-vnet.conf" | cut -d "-" -f 1))
 	for i in ${_profilename[@]}; do
-		i_state=$([ ! -f "${gbltmpdir}/vnet-${i}.network_up" ] && { echo "STOPPED/DOWN"; } || { echo "RUNNING/UP"; } )
-		i_dhcppid=$([ ! -f "${gbltmpdir}/vnet-${i}.network_up" ] && { echo "-"; } || { cat "${execrundir}/${i}.dnsmasq.pid"; } )
-		i_ipv4=$([ ! -f "${gbltmpdir}/vnet-${i}.network_up" ] && { echo "-"; } || { ps $i_dhcppid | grep -o -e "--listen-address [0-9]*.[0-9]*.[0-9]*.[0-9]* " | cut -d" " -f 2; } )
-		i_ipv6=$([ ! -f "${gbltmpdir}/vnet-${i}.network_up" ] && { echo "-"; } || { ps $i_dhcppid | grep -o -e "--listen-address [a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*" | cut -d" " -f 2; } )
+		i_state=$([ ! -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { echo "STOPPED/DOWN"; } || { echo "RUNNING/UP"; } )
+		i_dhcppid=$([ ! -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { echo "-"; } || { cat "${execrundir}/${i}.dnsmasq.pid"; } )
+		i_ipv4=$([ ! -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { echo "-"; } || { ps $i_dhcppid | grep -o -e "--listen-address [0-9]*.[0-9]*.[0-9]*.[0-9]* " | cut -d" " -f 2; } )
+		i_ipv6=$([ ! -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { echo "-"; } || { ps $i_dhcppid | grep -o -e "--listen-address [a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*" | cut -d" " -f 2; } )
 		i_persistent=$([ "$(grep "PERSISTENT=" ${profiledir}/${i}-vnet.conf  | sed 's/\"//g')" = "PERSISTENT=true" ] && echo "PERSISTENT" || echo "ON-DEMAND" )
 		echo -e "$i ; $i_persistent; $i_state ; $i_ipv4 ; $i_ipv6 ; $i_dhcppid"
 	done
@@ -467,7 +467,7 @@ module_profile_delete_main(){
    
    [ $(ls -1 ${profiledir}/ | cut -d "-" -f 1 | grep -e "${1}$" | uniq) ] || { 
 	echo -e "Existing profile name: \"${1}\", not found.\nYou may run \"${0##*/} list\" for a list of existing profiles."; return $_false; }
-   [  -f "${gbltmpdir}/vnet-${1}.network_up" ] && { echo -e "Profile \"${1}\" is still running. Please run \"vnet stop ${1}\" and re-run this command again."; return $_false; }
+   [  -f "${gbltmpvnetdir}/vnet-${1}.network_up" ] && { echo -e "Profile \"${1}\" is still running. Please run \"vnet stop ${1}\" and re-run this command again."; return $_false; }
    [ $(grep "PERSISTENT=\"true\"" ${profiledir}/${1}-vnet.conf) ] && { 
 	echo -e "You have set this profile \"${1}\" (i.e. PERSISTENT=\"true\" ) to be loaded when system startup.\nSome of your subsystem(s) may fails to work if this virtual network is missing/deleted."
    	read -p "- Do you wish to continue (i.e.DELETE)? [Y/n]: " answer;

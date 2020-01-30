@@ -1,6 +1,11 @@
 CHANGELOG
 =========
 
+Version 3.2.3
+Release Date: 30 Jan 2020
+1.  Creates vnet-tmp dir in global temp directory "/tmp" where all the "vnet-${VIRNET_BRIDGE}.network_up" file(s) will be stored.
+2.  Re-reference all modules and scripts to point to "/tmp/vnet-tmp" via variable gbltmpvnetdir
+
 Version 3.2.2
 Release Date: 5 Jan 2020
 1.  Bugfix: Typo in variable pointing dnsmasq config file.
