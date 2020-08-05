@@ -17,10 +17,22 @@ _iptables_proc() {
   
     #Allow IPV4 DHCP (67) and DNS (53)#
     iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p udp --dport 67 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
-    iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p tcp --dport 67 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p tcp --dport 67 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
     iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p udp --dport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
     iptables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p tcp --dport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
-    
+    #iptables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o ${VIRNET_BRIDGE} -p udp --sport 67 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #iptables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o ${VIRNET_BRIDGE} -p tcp --sport 67 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #iptables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o ${VIRNET_BRIDGE} -p udp --sport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #iptables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o ${VIRNET_BRIDGE} -p tcp --sport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+ 
+    ip6tables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p udp --dport 547 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #ip6tables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p tcp --dport 547 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    ip6tables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p udp --dport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    ip6tables $use_iptables_lock "${mode[$choice-insert]}" INPUT -i ${VIRNET_BRIDGE} -p tcp --dport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #ip6tables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o ${VIRNET_BRIDGE} -p udp --sport 547 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #ip6tables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o ${VIRNET_BRIDGE} -p tcp --sport 547 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #ip6tables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o ${VIRNET_BRIDGE} -p udp --sport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
+    #ip6tables $use_iptables_lock "${mode[$choice-insert]}" OUTPUT -o ${VIRNET_BRIDGE} -p tcp --sport 53 -j ACCEPT -m comment --comment "generated for ${VIRNET_BRIDGE} virtual network."
 
     if [ "${IS_ISOLATED_VIRNET}" = "true" ]; then
         # IPV4 #

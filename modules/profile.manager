@@ -310,10 +310,11 @@ module_profile_listings_main(){
 	echo -e "( Legend: NAME ; START TYPE ; STATE; IPV4 ; IPV6 ; DHCP PID )"
 	_profilename=($(ls -1 ${profiledir}  | grep -e "-vnet.conf" | cut -d "-" -f 1))
 	for i in ${_profilename[@]}; do
-		i_state=$([ ! -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { echo "STOPPED/DOWN"; } || { echo "RUNNING/UP"; } )
-		i_dhcppid=$([ ! -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { echo "-"; } || { cat "${execrundir}/${i}.dnsmasq.pid"; } )
-		i_ipv4=$([ ! -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { echo "-"; } || { ps $i_dhcppid | grep -o -e "--listen-address [0-9]*.[0-9]*.[0-9]*.[0-9]* " | cut -d" " -f 2; } )
-		i_ipv6=$([ ! -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { echo "-"; } || { ps $i_dhcppid | grep -o -e "--listen-address [a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*" | cut -d" " -f 2; } )
+        _check_active_bridge_managed_by_vnet ${i} && brstate=1 || brstate=0
+		i_state=$([ "${brstate}" == "0" ] && { echo "STOPPED/DOWN"; } || { echo "RUNNING/UP"; } )
+		i_dhcppid=$([ "${brstate}" == "0" ] && { echo "-"; } || { cat "${execrundir}/${i}.dnsmasq.pid"; } )
+		i_ipv4=$([ "${brstate}" == "0" ] && { echo "-"; } || { ps $i_dhcppid | grep -o -e "--listen-address [0-9]*.[0-9]*.[0-9]*.[0-9]* " | cut -d" " -f 2; } )
+		i_ipv6=$([ "${brstate}" == "0" ] && { echo "-"; } || { ps $i_dhcppid | grep -o -e "--listen-address [a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*:[a-f0-9]*" | cut -d" " -f 2; } )
 		i_persistent=$([ "$(grep "PERSISTENT=" ${profiledir}/${i}-vnet.conf  | sed 's/\"//g')" = "PERSISTENT=true" ] && echo "PERSISTENT" || echo "ON-DEMAND" )
 		echo -e "$i ; $i_persistent; $i_state ; $i_ipv4 ; $i_ipv6 ; $i_dhcppid"
 	done
@@ -322,7 +323,7 @@ module_profile_listings_main(){
 }
 
 module_profile_read_config(){
-     echo -e "List of variables captured from the profile config file:"
+     echo -e "» Below are the configurations for profile \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\":"
      while read -r l; do
 	[[ $(echo $l | grep -E "^#") ]] || [ -z $l ] ||  {
 		_tmp2conv2arr=$(echo "$l" | cut -d "=" -f 1;)
@@ -334,7 +335,6 @@ module_profile_read_config(){
                         ##larr=$(echo $_tmp2conv2arr | sed 's/'"${_tmp2conv2arr}"'/profile_params["&"]/g')
 		}
      done < ${profiledir}/${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}-vnet.conf
-     echo -e "\nThe above variable has been processed and shall be made editable"
      #echo "${profile_params["0.9-MAIN--VIRNET_IPV6_ADDR"]}","${profile_params["0.5-MAIN--VIRNET_BRIDGE_MAC"]}"
 
      return $_true
@@ -343,8 +343,9 @@ module_profile_read_config(){
 module_profile_new_main(){
 	_check_exec_installed_dir || { return $_false; }
 	#1 - mode: new,edit
-	[ ${#} -ne 1 ] && { return $_false; }
+	[ ${#} -lt 1 ] && { return $_false; }
 	_opn_type="${1}"
+    profile_params["0.1-MAIN--VIRNET_BRIDGE"]="${2}"
 
 	if [ "$_opn_type" == "new" ]; then
 		echo -e "Creating a new profile can be as easy as counting 1 2 3, let me walk you through the process, and without further a do, let's start..\n"
@@ -378,8 +379,12 @@ module_profile_new_main(){
 		}
 	elif [ "$_opn_type" == "edit" ]; then
 		question_loop_check_grep "${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}" "I need to know the name of the bridge (vnet) aka profile name, so that I can read the profile config file." "${grep_virnet_name}" 0 && { profile_params["0.1-MAIN--VIRNET_BRIDGE"]="${choice}"; }
-		grep -qR "VIRNET_BRIDGE=\"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"" ${topdir}/profiles/*-vnet.conf && { module_profile_read_config; } || 
+		grep -qR "VIRNET_BRIDGE=\"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"" ${topdir}/profiles/*-vnet.conf && { module_profile_read_config; echo -e "\nThe above variable has been processed and thus lets proceed to edit them...\n"; } || 
 			{ echo -e "\nE: Profile with the name \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\" does not exist!\nNo worries, we will thus proceed to create a new profile using this profile name \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"..\n"; _opn_type="new"; }
+	elif [ "$_opn_type" == "show" ]; then
+        question_loop_check_grep "${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}" "I need to know the name of the bridge (vnet) aka profile name, so that I can read it and show you the configurations of the profile." "${grep_virnet_name}" 0 && { profile_params["0.1-MAIN--VIRNET_BRIDGE"]="${choice}"; }
+        grep -qR "VIRNET_BRIDGE=\"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\"" ${topdir}/profiles/*-vnet.conf && { module_profile_read_config; return $_true; } ||
+            { echo -e "\nE: The name of the Profile you have provided \"${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}\" does not exist!"; return $_false; }
 	fi
 
 	question_loop_check_grep "${profile_params["0.2-MAIN--PERSISTENT"]}" "Run this bridge/profile automatically on every system startup? [true/false] " "${grep_match_true_false}" 0 && { profile_params["0.2-MAIN--PERSISTENT"]="${choice}"; } 
@@ -467,7 +472,7 @@ module_profile_delete_main(){
    
    [ $(ls -1 ${profiledir}/ | cut -d "-" -f 1 | grep -e "${1}$" | uniq) ] || { 
 	echo -e "Existing profile name: \"${1}\", not found.\nYou may run \"${0##*/} list\" for a list of existing profiles."; return $_false; }
-   [  -f "${gbltmpvnetdir}/vnet-${1}.network_up" ] && { echo -e "Profile \"${1}\" is still running. Please run \"vnet stop ${1}\" and re-run this command again."; return $_false; }
+   _check_active_bridge_managed_by_vnet ${1} && { echo -e "Profile \"${1}\" is still running. Please run \"vnet stop ${1}\" and re-run this command again."; return $_false; }
    [ $(grep "PERSISTENT=\"true\"" ${profiledir}/${1}-vnet.conf) ] && { 
 	echo -e "You have set this profile \"${1}\" (i.e. PERSISTENT=\"true\" ) to be loaded when system startup.\nSome of your subsystem(s) may fails to work if this virtual network is missing/deleted."
    	read -p "- Do you wish to continue (i.e.DELETE)? [Y/n]: " answer;

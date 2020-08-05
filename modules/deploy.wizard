@@ -88,7 +88,7 @@ wizard_deploy_upgrade_main(){
     wizard_deploy_welcome
     _check_exec_installed_dir &>/dev/null && { echo -e "I: You are performing upgrade request from installed side of vnet @ \"${topdir}\".\n   Please run upgrade request from the downloaded package instead."; return $_false; }
 
-    install_path="${wizard_dir_install_default}"
+    install_path="$(readlink $(which vnet 2>/dev/null) 2>/dev/null | sed 's/\/vnet$//g')"
     read -p "I need to know your current vnet install location.: " -i ${install_path} -e install_path
     # Check file or dir exist based on user's choice - Begin #
     eval install_path=$install_path
@@ -130,7 +130,7 @@ wizard_deploy_upgrade_main(){
 	    echo -e "Packaged version is older than installed version, skipping."; return $_false;
     elif [[ ${_tmp_status} == 3 ]]; then
 	    echo -e "It's still the same version, we will have new releases soon :)"; 
-	    read -p "However, we still allows the installed copy to be overwritten (reinstallation) with the package copy if you want (Y to reinstalls). [Y/n]: " choice
+	    read -p "If you wish to reinstall, please indicate Y. [Y/n]: " choice
 	    [ "${choice}" = "Y" ] && { echo -e "I: Proceed with reinstallation"; } || { echo -e "No worries, nothing has been replaced."; return $_false; }
     fi
 
@@ -139,9 +139,9 @@ wizard_deploy_upgrade_main(){
     _vnetsvc_chksum_pkg=$( _get_systemd_wrapper_config | sha256sum | cut -d " " -f 1 )
     _vnetsvc_chksum_installed=$( sha256sum ${install_path}/vnet.service 2>/dev/null | cut -d " " -f 1 )
 
-    echo -e "\nvnet performs upgrade by replacing the main vnet file, modules if the forcibly.\nProfile(s) files in profiles directory will only be modified with changes so that it will work with the updated version of vnet.\nexec directory belongs to runtime file and will not be touched."
+    echo -e "\nvnet performs upgrade by replacing the main vnet file, files located in the \"modules\" directory and the Changelog file.\nFile(s) in \"profiles\" directory will be modified when required in order for it to be parseable with this version of vnet.\nFile(s) in \"exec\" directory belongs to runtime and will not be modified by this upgrade script."
     
-    echo -e "\nChanges to file system will begin here...\n"
+    echo -e "\nUpgrading vnet...\n"
     [ "${choice}" = "Y" ] || { 
     	read -p "» To continue, enter Y. [Y/n] : " choice
     	[ "${choice}" = "Y" ] || { echo -e "» User choose to abort vnet upgrade. No changes made to the host's filesystem, yet! =)"; return $_false; }
@@ -150,7 +150,7 @@ wizard_deploy_upgrade_main(){
 
     ## Stage 1 - replace files ##
     cd ${0%%/*}
-    wizard_deploy_command_extn "$_need_sudo cp -rf vnet modules CHANGELOG ${install_path}" "Replacing main module (vnet) and modules." || { echo -e "E: Fails to replace files required for the upgrade."; has_fault=1; }
+    wizard_deploy_command_extn "$_need_sudo cp -rf vnet modules CHANGELOG ${install_path}" "Replacing main module (vnet) and files in \"modules\" directory." || { echo -e "E: Failed to replace files required for the upgrade."; has_fault=1; }
 
     [ "${_vnetsvc_chksum_pkg}" == "${_vnetsvc_chksum_installed}" ] && { echo -e "I: No changes to vnet.service file."; } || {	
 	_get_systemd_wrapper_config | $_need_sudo tee "${install_path}/vnet.service" &>/dev/null && \
@@ -160,7 +160,7 @@ wizard_deploy_upgrade_main(){
     ## Stage 2 - Patch profiles ##
     # Not required at this stage
 
-    [ ${has_fault} == 1 ] && { echo "W: One or more error(s) has occured! Upgrade unsuccessful and vnet may not work on next start/restart."; return $_false; }
+    [ ${has_fault} == 1 ] && { echo "W: One or more error(s) has/have occured! Upgrade process is unsuccessful and vnet may not work on next start/restart."; return $_false; }
     echo -e "\nI: Successfully upgraded/reinstalled vnet from ${installed_ver} to ${version}.\n" 
 
     return $_true
@@ -239,7 +239,7 @@ wizard_deploy_uninstall_main(){
     virtnetlist=( $(ls -1 "${profiledir}"  | grep -e "-vnet.conf" | cut -d "-" -f 1) )
     for i in ${virtnetlist[@]}; do
 	echo -e "\tFound profile: \"${i}\", attempt to stop it and remove the profile's residue file(s).."
-	[ -f "${gbltmpvnetdir}/vnet-${i}.network_up" ] && { $_need_sudo $install_path/vnet stop ${i}; } 
+	_check_active_bridge_managed_by_vnet ${i} && { $_need_sudo $install_path/vnet stop ${i}; } 
 	wizard_deploy_command_extn "$_need_sudo rm -f /etc/dnsmasq/vnet.*${i}" "remove dns binding residue file for vnet \"${i}\"."
     done
 

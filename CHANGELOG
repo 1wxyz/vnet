@@ -1,6 +1,18 @@
 CHANGELOG
 =========
 
+Version 3.2.4
+Release Date: 04 Aug 2020
+1.  Feature: Implement _check_active_bridge_managed_by_vnet() to check if virtual bridge is running and is managed by vnet
+2.  Deprecated: With the implementation of "1" above, decomission of variable gbltmpvnetdir and vnet shall not use "/tmp/vnet-tmp" directory from this version onwards.
+3.  Feature: Implement "stop-force" command for force stop a virtual interface should it be not working.
+4.  Bugfix: Interface deletion will be prompted for user's confirmation if the virtual interface has devices attached to it unless "stop" command is called by systemd or "stop-force" command is issued.
+5.  Deprecated: Do not delete interface if the virtual interface has devices attached to it unless unless "stop" command is called by systemd.
+6.  Upgrade command shall discover the directory/path where vnet is installed at instead of prompting the default install directory.
+7.  Correction on some of the message prompt(s) for the upgrade command.
+8.  Bugfix: Fix bridges that has been started before vnet's systemd script that returns false as it is already running, thus causes systemd to report "status=1/FAILURE".
+9.  Feature: Implement "show|show-profile|-sp" feature to display configurations of an existing profile.
+
 Version 3.2.3
 Release Date: 30 Jan 2020
 1.  Creates vnet-tmp dir in global temp directory "/tmp" where all the "vnet-${VIRNET_BRIDGE}.network_up" file(s) will be stored.

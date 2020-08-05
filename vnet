@@ -1,20 +1,19 @@
 #!/usr/bin/bash -
 [ "${0##*/}" == "vnet" ] || { echo -e "This script shall be of filename \"vnet\" (w/o quotes)"; exit 1; }
-version="3.2.3"
+version="3.2.4"
 shell_script_info="Virtual Network (vnet) Kit ${version}"
 
 _false=1
 _true=0
 
 topdir=$(readlink -f "${0}")
-topdir="${topdir%/*}"	#topdir="/shared/etcetera/kit.nix/net.virtualnet"
+topdir="${topdir%/*}"
 #echo $topdir && exit
 profiledir="${topdir}/profiles"
 modulesdir="${topdir}/modules"
 execrundir="${topdir}/exec"	#varrun
 execlibdir="${topdir}/exec"	#varlib
-gbltmpdir="/tmp"
-gbltmpvnetdir="${gbltmpdir}/vnet-tmp"
+gblsysvirtnetdir="/sys/devices/virtual/net"
 
 
 #### ALL FUNCTIONS STARTS HERE ####
@@ -24,22 +23,19 @@ _check_has_root(){
     [[ $EUID == 0 ]] && { return $_true; } || { return $_false; }
 }
 
-_check_exec_installed_dir(){
-    [ -f ${topdir}/.installed ] || { echo -e "E: Running vnet directly without installing is stricly disallowed!\n   Please run \"install\" command to begin installation process or \"upgrade\" to upgrade vnet installed on the host.\n   Running vnet without arguments will show the list of commands available based on the mode the tool is running in."; return $_false; }
-    . "${topdir}/.installed"
-    [[ "${topdir}" == "${VIRNET_INSTALLED_PATH}" ]] || { echo -e "E: Running vnet directory without going through proper installation process is strictly disallowed!\n   Please re-run \"install\" command to re-run the installation process."; return $_false; }
-    return $_true
-}
-
 _msg_only_exe_via_systemd="Command can only be executed via systemd. Exiting.."
 _check_exec_via_systemd(){
     [[ "${PPID}" == "1" ]] && { return $_true; } || { return $_false; }
 }
 
-_source_modules(){
-    [ -f $modulesdir/${1} ] || { echo "Module file \"${1}\" does not exist."; return $_false; }
-    . $modulesdir/${1}
+_source_file(){
+    [ -f ${1} ] || { return $_false; }
+    . ${1}
     return $_true
+}
+
+_source_modules(){
+    _source_file "$modulesdir/${1}" || { echo "Module file \"${1}\" does not exist."; return $_false; }
 }
 
 _netmask2cidr(){
@@ -61,6 +57,27 @@ _cidr2netmask(){
     return $_true
 }
 
+_check_exec_installed_dir(){
+    [ -f ${topdir}/.installed ] || { echo -e "E: Running vnet directly without installing is stricly disallowed!\n   Please run \"install\" command to begin installation process or \"upgrade\" to upgrade vnet installed on the host.\n   Running vnet without arguments will show the list of commands available based on the mode the tool is running in."; return $_false; }
+    . "${topdir}/.installed"
+    [[ "${topdir}" == "${VIRNET_INSTALLED_PATH}" ]] || { echo -e "E: Running vnet directory without going through proper installation process is strictly disallowed!\n   Please re-run \"install\" command to re-run the installation process."; return $_false; }
+    return $_true
+}
+
+_check_active_bridge_managed_by_vnet(){
+    unset tmpbrmacaddr tmpbrnetaddr tmpbrmacaddrcheck tmpbrnetaddripv4check tmpbrnetaddripv6check
+    [ -d ${gblsysvirtnetdir}/${1} ] || return $_false;   #indicates that iface does not exist
+    [ -f ${gblsysvirtnetdir}/${1}/address ] && tmpbrmacaddr=($(cat ${gblsysvirtnetdir}/${1}/address))
+    tmpbrnetaddr+=($(ip -o -p -4 address ls ${1} | cut -d\\ -f1 | sed 's/  */ /g' | tr ' ' ';' | cut -d\; -f4))
+    tmpbrnetaddr+=($(ip -o -p -6 address ls ${1} | cut -d\\ -f1 | sed 's/  */ /g' | tr ' ' ';' | cut -d\; -f4))
+    [ "${VIRNET_BRIDGE}" != "${1}" ] && { _source_file "${profiledir}/${1}-vnet.conf" || { return $_false; } }
+    echo "${tmpbrmacaddr[@]}" | grep -oq "${VIRNET_BRIDGE_MAC}" && tmpbrmacaddrcheck=1  || unset tmpbrmacaddrcheck
+    echo "${tmpbrnetaddr[@]}" | grep -oq "${VIRNET_IPV4_ADDR}/${VIRNET_IPV4_NETWORK##*/}" && tmpbrnetaddripv4check=1 || unset tmpbrnetaddripv4check
+    echo "${tmpbrnetaddr[@]}" | grep -oq "${VIRNET_IPV6_ADDR}/${VIRNET_IPV6_NETWORK##*/}" && tmpbrnetaddripv6check=1 || unset tmpbrnetaddripv6check
+    [ "${tmpbrmacaddrcheck}" ] && [ "${tmpbrnetaddripv4check}" ] && [ "${tmpbrnetaddripv6check}" ] || { return $_false; }
+    return $_true;
+}
+
 _init_profile_generated_variables(){
     #Only applies to start()
     VIRNET_DHCP_CFGFILE="${profiledir}/${VIRNET_BRIDGE}-vnet-dnsmasq.conf"
@@ -77,7 +94,7 @@ _ifup(){
     MASK=${VIRNET_IPV4_NETWORK##*/}
     CIDR_ADDR="${VIRNET_IPV4_ADDR}/${MASK}"
     ip addr add ${CIDR_ADDR} dev ${VIRNET_BRIDGE}
-    ip link set dev ${VIRNET_BRIDGE} address $VIRNET_BRIDGE_MAC
+    ip link set dev ${VIRNET_BRIDGE} address ${VIRNET_BRIDGE_MAC}
     ip link set dev ${VIRNET_BRIDGE} up
 }
 
@@ -85,7 +102,8 @@ _setup_dhcp_server(){
 
     if [ -n "$VIRNET_IPV6_ADDR" ] && [ -n "$VIRNET_IPV6_NETWORK" ]; then
 	#VIRNET_IPV6_ARG="--dhcp-range=${VIRNET_IPV6_ADDR},ra-only --listen-address ${VIRNET_IPV6_ADDR}"
-	VIRNET_IPV6_ARG="--dhcp-range=::,constructor:${VIRNET_BRIDGE},ra-stateless,ra-names --listen-address ${VIRNET_IPV6_ADDR}"
+	#VIRNET_IPV6_ARG="--dhcp-range=::,constructor:${VIRNET_BRIDGE},ra-stateless,ra-names --listen-address ${VIRNET_IPV6_ADDR} --enable-ra"
+	VIRNET_IPV6_ARG="--dhcp-range=::,constructor:${VIRNET_BRIDGE},ra-names --listen-address ${VIRNET_IPV6_ADDR} --enable-ra"
     fi
 
     VIRNET_DOMAIN_ARG=""
@@ -114,7 +132,7 @@ _setup_dhcp_server(){
     #Check if lease time
     [ VIRNET_IPV4_DHCP_LEASETIME == "" ] || VIRNET_IPV4_DHCP_RANGE="${VIRNET_IPV4_DHCP_RANGE},${VIRNET_IPV4_DHCP_LEASETIME}"
 
-    VIRNET_IPV4_ARG="--listen-address ${VIRNET_IPV4_ADDR} --dhcp-range ${VIRNET_IPV4_DHCP_RANGE} --dhcp-lease-max=${VIRNET_IPV4_DHCP_MAX}"
+    VIRNET_IPV4_ARG="--listen-address ${VIRNET_IPV4_ADDR} --dhcp-range ${VIRNET_IPV4_DHCP_RANGE} --dhcp-lease-max=${VIRNET_IPV4_DHCP_MAX} --dhcp-rapid-commit"
 
     dnsmasq $VIRNET_DHCP_CFGFILE_ARG $VIRNET_DOMAIN_ARG $VIRNET_IPV4_DHCP_PING_ARG -u ${DNSMASQ_USER} \
             --strict-order --bind-interfaces --pid-file="${execrundir}"/${VIRNET_BRIDGE}.dnsmasq.pid \
@@ -138,11 +156,11 @@ start(){
     # Generate other Profile required variables
     _init_profile_generated_variables
 
-    [ "x$USE_THIS_PROFILE" = "xtrue" ] || [ -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo -e "This profile \"${VIRNET_BRIDGE}\" has been disabled."; return $_true; }
+    [ "x$USE_THIS_PROFILE" = "xtrue" ] || _check_active_bridge_managed_by_vnet ${VIRNET_BRIDGE} || { echo -e "This profile \"${VIRNET_BRIDGE}\" has been disabled."; return $_true; }
 
-    [ ! -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { echo "${VIRNET_BRIDGE} is already running"; return $_false; }
+    _check_active_bridge_managed_by_vnet ${VIRNET_BRIDGE} && { echo "${VIRNET_BRIDGE} is already running";  { [[ "${PPID}" == "1" ]] && return $_true || return $_false; } }
 
-    if [ -d /sys/class/net/${VIRNET_BRIDGE} ]; then
+    if [ -d ${gblsysvirtnetdir}/${VIRNET_BRIDGE} ]; then
         stop force || $_true
     fi
 
@@ -161,7 +179,7 @@ start(){
     set -e
 
     # set up the lxc network
-    [ ! -d /sys/class/net/${VIRNET_BRIDGE} ] && ip link add dev ${VIRNET_BRIDGE} type bridge
+    [ ! -d ${gblsysvirtnetdir}/${VIRNET_BRIDGE} ] && ip link add dev ${VIRNET_BRIDGE} type bridge
     echo 1 > /proc/sys/net/ipv4/ip_forward
     echo 0 > /proc/sys/net/ipv6/conf/${VIRNET_BRIDGE}/accept_dad || $_true
 
@@ -189,39 +207,45 @@ start(){
 
     _setup_dhcp_server || cleanup
 
-    [ -d ${gbltmpvnetdir} ] || { mkdir -p ${gbltmpvnetdir}; }
-    touch "${gbltmpvnetdir}"/vnet-${VIRNET_BRIDGE}.network_up
-    printf "${VIRNET_BRIDGE} started successfully.\n"
+    printf "Virtual Bridge \"${VIRNET_BRIDGE}\" started successfully.\n"
     FAILED=0
 }
 
 stop(){
-    [ "x$USE_THIS_PROFILE" = "xtrue" ] || [ -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || [ "$1" = "force" ] || { return $_true; }
+    [ "x$USE_THIS_PROFILE" = "xtrue" ] || _check_active_bridge_managed_by_vnet ${VIRNET_BRIDGE} || [ "$1" = "force" ] || { return $_true; }
 
-    [ -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || [ "$1" = "force" ] || { echo "${VIRNET_BRIDGE} isn't running";  
-	{ [[ "${PPID}" == "1" ]] && return $_true || return $_false; } }
+    _check_active_bridge_managed_by_vnet ${VIRNET_BRIDGE} || [ "$1" = "force" ] || { echo "${VIRNET_BRIDGE} isn't running"; { [[ "${PPID}" == "1" ]] && return $_true || return $_false; } }
 
-    [ -d /sys/class/net/${VIRNET_BRIDGE}-tap ] && { _source_modules "network.tap" && _tapadapter_down; }
-    if [ -d /sys/class/net/${VIRNET_BRIDGE} ]; then
+    # if $VIRNET_BRIDGE has attached interfaces, don't destroy the bridge, unless it is called by systemd stop command
+    if [[ ! "${PPID}" == "1" ]] || [ ! "$1" = "force" ]; then
+        if [ "$(ls -A ${gblsysvirtnetdir}/${VIRNET_BRIDGE}/brif/)" ]; then
+            echo -e "» There are virtual adapters attached to this bridge and shutting/stopping this bridge interface will cause network connectivity issues for devices connected to this (\"${VIRNET_BRIDGE}\") interface."
+            read -p "   - To proceed shutting down (\"${VIRNET_BRIDGE}\") interface, enter Y. [Y/n] : " choice
+            [ "${choice}" = "Y" ] || { echo -e "» User choose to abort shutting down (\"${VIRNET_BRIDGE}\") bridge interface."; return $_false; }
+        fi
+    fi
+
+    [ -d ${gblsysvirtnetdir}/${VIRNET_BRIDGE}-tap ] && { _source_modules "network.tap" && _tapadapter_down; }
+    if [ -d ${gblsysvirtnetdir}/${VIRNET_BRIDGE} ]; then
         _ifdown
         #_iptables_down
 	_iptables_proc down
 
         pid=`cat "${execrundir}"/${VIRNET_BRIDGE}.dnsmasq.pid 2>/dev/null` && kill -9 $pid
         rm -f "${execrundir}"/${VIRNET_BRIDGE}.dnsmasq.pid
-        # if $VIRNET_BRIDGE has attached interfaces, don't destroy the bridge, unless it is called by systemd stop command
-	[[ "${PPID}" != "1" ]] && { ls /sys/class/net/${VIRNET_BRIDGE}/brif/* > /dev/null 2>&1 || ip link delete ${VIRNET_BRIDGE}; } || { ip link delete ${VIRNET_BRIDGE}; }
+    
+        ip link delete ${VIRNET_BRIDGE};
     fi
-    rm -f "${gbltmpvnetdir}"/vnet-${VIRNET_BRIDGE}.network_up
-    rm -f "${execlibdir}"/${VIRNET_BRIDGE}.dnsmasq.leases
-    printf "${VIRNET_BRIDGE} stopped successfully.\n"
+    
+    [ -f "${execlibdir}"/${VIRNET_BRIDGE}.dnsmasq.leases ] && rm -f "${execlibdir}"/${VIRNET_BRIDGE}.dnsmasq.leases
+    printf "Virtual Bridge \"${VIRNET_BRIDGE}\" stopped successfully.\n"
 }
 
 restart_dhcp_server(){
     echo "Restart DHCP Server Feature"
     echo "==========================="
-    [ ! -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] && { echo "Couldn't restart DHCP server for \"${VIRNET_BRIDGE}\" network as it is not up/running. Exiting.."; return $_false; }
-    i_dhcppid=$([ ! -f "${gbltmpvnetdir}/vnet-${VIRNET_BRIDGE}.network_up" ] || { cat "${execrundir}/${VIRNET_BRIDGE}.dnsmasq.pid"; } )
+    _check_active_bridge_managed_by_vnet ${VIRNET_BRIDGE} || { echo "Couldn't restart DHCP server for \"${VIRNET_BRIDGE}\" network as it is not up/running. Exiting.."; return $_false; }
+    i_dhcppid=$(cat "${execrundir}/${VIRNET_BRIDGE}.dnsmasq.pid";)
     [ -n $i_dhcppid ] &&  [[ $(grep -E "${VIRNET_BRIDGE}.*dnsmasq"  /proc/$i_dhcppid/cmdline) ]] && { 
 	echo -e "Existing DHCP (dnsmasq) process for \"${VIRNET_BRIDGE}\" found with PID:$i_dhcppid will be terminated.";
     	kill -9 $i_dhcppid || { echo -e "Unable to terminate dnsmasq PID:$i_dhcppid, exiting.."; return $_false; }
@@ -262,7 +286,7 @@ precheck(){
 
     # Check if config file exist and attempt to load config file
     # shellcheck disable=SC1090
-    [ ! -f "${config}" ] && { echo -e "!!ERROR!! Config File not Found! It should be stored in ${config}"; exit 1; }  || . "${config}" 
+    _source_file "${config}" || { echo -e "!!ERROR!! Config File not Found! It should be stored in ${config}"; exit 1; } 
     [ "${2}" != "${VIRNET_BRIDGE}" ] && { echo -e "!!Error!!\nArgument 1 \"${1}\" is not the same as VIRNET_BRIDGE=\"${VIRNET_BRIDGE}\" in profiles/${2}-vnet.conf\nPlease change VIRNET_BRIDGE=\"${2}\" manually in profiles/${2}-vnet.conf"; return $_false; }
 
 #echo "$USE_THIS_PROFILE, $VIRNET_BRIDGE, $VIRNET_BRIDGE_MAC, $VIRNET_IPV4_ADDR, $VIRNET_IPV4_NETWORK, $VIRNET_IPV4_DHCP_RANGE, $VIRNET_IPV4_DHCP_MAX, $VIRNET_DHCP_CFGFILE, $VIRNET_IPV4_DHCP_PING, $VIRNET_DOMAIN, $VIRNET_IPV6_ADDR, $VIRNET_IPV6_NETWORK"
@@ -275,7 +299,10 @@ precheck(){
 	stop)
 	    stop
 	    ;;
-   	restart-dhcp|-rd)
+	stop-force)
+	    stop force
+	    ;;
+	restart-dhcp|-rd)
 	    restart_dhcp_server
 	    ;;
  
@@ -301,6 +328,10 @@ case "$1" in
 	precheck $1 $2
     ;;
 
+    stop-force)
+	precheck $1 $2
+    ;;
+
     startup|shutdown)
 	daemon_fetch_list_virtualnetworks $1
     ;;
@@ -313,15 +344,20 @@ case "$1" in
     restart-dhcp|-rd)
 	precheck $1 $2
     ;;
+    
+    show|show-profile|-sp)
+    _source_modules "profile.manager"
+    module_profile_new_main "show" $2
+    ;;
 
     new|new-profile|-np)
 	_source_modules "profile.manager"
-	module_profile_new_main "new"
+	module_profile_new_main "new" $2
     ;;
 
     edit|edit-profile|-ep)
 	_source_modules "profile.manager"
-	module_profile_new_main "edit"
+	module_profile_new_main "edit" $2
     ;;
 
     export|export-profile|-exp)
@@ -398,15 +434,17 @@ case "$1" in
 	echo -e "\tmacgen \n\t\tRandomly generates an unicast MAC Address.\n"
 	echo -e "\tversion, -v \n\t\tDisplay version information.\n"
 	echo -e "\t--show-change-log \n\t\tDisplays CHANGELOG information on terminal.\n"
-        echo -e "  ▪ For Tool mode:\n"
-	echo -e "\tlist, status,-l \n\t\tList Profile(s) Information and Status.\n"
-        echo -e "\tstart <profile_name> \n\t\tStart virtual network of profile name.\n"
-        echo -e "\tstop <profile_name> \n\t\tStop virtual network of profile name.\n"
-        echo -e "\trestart, reload <profile_name> \n\t\tRestart virtual network of profile name.\n"
+    echo -e "  ▪ For Tool mode:\n"
+	echo -e "\tlist, status, -l \n\t\tList Profile(s) Information and Status.\n"
+    echo -e "\tstart <profile_name> \n\t\tStart virtual network of profile name.\n"
+    echo -e "\tstop <profile_name> \n\t\tStop virtual network of profile name.\n"
+    echo -e "\tstop-force <profile_name> \n\t\tForce Stop virtual network of profile name.\n"
+    echo -e "\trestart, reload <profile_name> \n\t\tRestart virtual network of profile name.\n"
 	echo -e "\tforce-reload <profile_name> \n\t\tRestart (force) virtual network of profile name. Use it when restart/reload does not work.\n"
 	echo -e "\trestart-dhcp, -rd <profile_name> \n\t\tRestart DHCP service for the profile name (virtual network). Use it when changes has been made to dnsmasq.\n"
-	echo -e "\tnew, new-profile, -np \n\t\tCreates a new profile.\n"
-	echo -e "\tedit, edit-profile, -ep \n\t\tEdits an existing profile.\n"
+	echo -e "\tshow, show-profile, -sp <profile_name_optional> \n\t\tShow configurations of an existing profile.\n"
+	echo -e "\tnew, new-profile, -np <profile_name_optional> \n\t\tCreates a new profile.\n"
+	echo -e "\tedit, edit-profile, -ep <profile_name_optional> \n\t\tEdits an existing profile.\n"
 	echo -e "\texport, export-profile, -exp \n\t\tExports an existing profile.\n"
 	echo -e "\timport, import-profile, -imp \n\t\tImports an existing profile.\n"
 	echo -e "\tdelete, delete-profile, -dp \n\t\tDeletes an existing profile.\n"
