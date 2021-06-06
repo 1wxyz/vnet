@@ -1,6 +1,10 @@
 CHANGELOG
 =========
 
+Version 3.2.5
+Release Date: 06 Jun 2021
+1. Bugfix: Fixed improper bridge setup in daemon mode due to systemd unit configuration. Removed "Want" and ammend "After" from "network-online.target" to "network.target"
+
 Version 3.2.4
 Release Date: 04 Aug 2020
 1.  Feature: Implement _check_active_bridge_managed_by_vnet() to check if virtual bridge is running and is managed by vnet

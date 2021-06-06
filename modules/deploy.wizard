@@ -13,8 +13,7 @@ echo -e "## DO NOT REMOVE THIS FILE MANUALLY. Run command \"vnet uninstall\" and
 
 [Unit]
 Description=Virtual Network Auto Processor
-After=network-online.target
-Wants=network-online.target
+After=network.target
 
 [Service]
 Type=oneshot

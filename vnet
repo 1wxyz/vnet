@@ -1,6 +1,6 @@
 #!/usr/bin/bash -
 [ "${0##*/}" == "vnet" ] || { echo -e "This script shall be of filename \"vnet\" (w/o quotes)"; exit 1; }
-version="3.2.4"
+version="3.2.5"
 shell_script_info="Virtual Network (vnet) Kit ${version}"
 
 _false=1
