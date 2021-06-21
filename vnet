@@ -1,6 +1,6 @@
 #!/usr/bin/bash -
 [ "${0##*/}" == "vnet" ] || { echo -e "This script shall be of filename \"vnet\" (w/o quotes)"; exit 1; }
-version="3.2.5"
+version="3.2.6"
 shell_script_info="Virtual Network (vnet) Kit ${version}"
 
 _false=1
@@ -15,6 +15,8 @@ execrundir="${topdir}/exec"	#varrun
 execlibdir="${topdir}/exec"	#varlib
 gblsysvirtnetdir="/sys/devices/virtual/net"
 
+## Unset Runtime Flags ##
+unset flag_reboot
 
 #### ALL FUNCTIONS STARTS HERE ####
 
@@ -78,6 +80,32 @@ _check_active_bridge_managed_by_vnet(){
     return $_true;
 }
 
+_fetch_br_veth_ifaces(){
+    unset br_veth_ifaces_list
+    br_veth_ifaces_list=($(ls -A ${gblsysvirtnetdir}/${1}/brif/))
+    [  ${#br_veth_ifaces_list[@]} != 0 ] && return $_true || return $_false
+}
+
+_restore_br_veth_ifaces(){
+    for i in ${br_veth_ifaces_list[@]}; do
+        ip link set $i master ${1}
+    done
+    return $_true;
+}
+
+_print_br_veth_ifaces(){
+    printf "» The following are the virtual interfaces that is currently attached to \"${VIRNET_BRIDGE}\": \n"
+    printf "${br_veth_ifaces_list[*]}\n"
+    return $_true;
+}
+
+_print_help_manual_reattach_veth_ifaces(){
+    printf "» You may use command ip or brctl on the terminal with root privileges to re-attach them to the bridge. Example:\n"
+    printf "  1. Using command brctl: \"brctl addif ${VIRNET_BRIDGE} <virtual_interface_name>\"\n"
+    printf "  2. Using command ip: \"ip link set <virtual_interface_name> master ${VIRNET_BRIDGE}\"\n"
+    return $_true;
+}
+
 _init_profile_generated_variables(){
     #Only applies to start()
     VIRNET_DHCP_CFGFILE="${profiledir}/${VIRNET_BRIDGE}-vnet-dnsmasq.conf"
@@ -101,9 +129,7 @@ _ifup(){
 _setup_dhcp_server(){
 
     if [ -n "$VIRNET_IPV6_ADDR" ] && [ -n "$VIRNET_IPV6_NETWORK" ]; then
-	#VIRNET_IPV6_ARG="--dhcp-range=${VIRNET_IPV6_ADDR},ra-only --listen-address ${VIRNET_IPV6_ADDR}"
-	#VIRNET_IPV6_ARG="--dhcp-range=::,constructor:${VIRNET_BRIDGE},ra-stateless,ra-names --listen-address ${VIRNET_IPV6_ADDR} --enable-ra"
-	VIRNET_IPV6_ARG="--dhcp-range=::,constructor:${VIRNET_BRIDGE},ra-names --listen-address ${VIRNET_IPV6_ADDR} --enable-ra"
+	VIRNET_IPV6_ARG="--dhcp-range ::,constructor:${VIRNET_BRIDGE},ra-stateless,ra-names --listen-address ${VIRNET_IPV6_ADDR} --enable-ra"
     fi
 
     VIRNET_DOMAIN_ARG=""
@@ -134,9 +160,10 @@ _setup_dhcp_server(){
 
     VIRNET_IPV4_ARG="--listen-address ${VIRNET_IPV4_ADDR} --dhcp-range ${VIRNET_IPV4_DHCP_RANGE} --dhcp-lease-max=${VIRNET_IPV4_DHCP_MAX} --dhcp-rapid-commit"
 
-    dnsmasq $VIRNET_DHCP_CFGFILE_ARG $VIRNET_DOMAIN_ARG $VIRNET_IPV4_DHCP_PING_ARG -u ${DNSMASQ_USER} \
+    dnsmasq $VIRNET_DHCP_CFGFILE_ARG $VIRNET_DOMAIN_ARG -u ${DNSMASQ_USER} \
             --strict-order --bind-interfaces --pid-file="${execrundir}"/${VIRNET_BRIDGE}.dnsmasq.pid \
-            --quiet-dhcp --quiet-dhcp6 --quiet-ra --dhcp-no-override $VIRNET_IPV4_ARG $VIRNET_IPV6_ARG \
+            --quiet-dhcp --quiet-dhcp6 --quiet-ra --dhcp-no-override \
+            $VIRNET_IPV6_ARG $VIRNET_IPV4_ARG $VIRNET_IPV4_DHCP_PING_ARG \
             --except-interface=lo --interface=${VIRNET_BRIDGE} \
             --dhcp-leasefile="${execlibdir}"/${VIRNET_BRIDGE}.dnsmasq.leases \
             --dhcp-authoritative || false
@@ -178,14 +205,15 @@ start(){
     trap cleanup EXIT HUP INT TERM
     set -e
 
-    # set up the lxc network
+    ## Checks done - proceed to build the bridge ##
+    
     [ ! -d ${gblsysvirtnetdir}/${VIRNET_BRIDGE} ] && ip link add dev ${VIRNET_BRIDGE} type bridge
     echo 1 > /proc/sys/net/ipv4/ip_forward
     echo 0 > /proc/sys/net/ipv6/conf/${VIRNET_BRIDGE}/accept_dad || $_true
 
     # if we are run from systemd on a system with selinux enabled,
-    # the mkdir will create /run/lxc as init_var_run_t which dnsmasq
-    # can't write its pid into, so we restorecon it (to var_run_t)
+    # the mkdir will create dir defined in this variable ${execrundir} as init_var_run_t 
+    # which dnsmasq can't write its pid into, so we restorecon it (to var_run_t)
     if [ ! -d "${execrundir}" ]; then
         mkdir -p "${execrundir}"
         if which restorecon >/dev/null 2>&1; then
@@ -208,6 +236,12 @@ start(){
     _setup_dhcp_server || cleanup
 
     printf "Virtual Bridge \"${VIRNET_BRIDGE}\" started successfully.\n"
+    
+    if [ ${#br_veth_ifaces_list[@]} -gt 0 ]; then
+        printf "Restoring virtual interfaces for \"${VIRNET_BRIDGE}\" after restart..\n"
+        _restore_br_veth_ifaces "${VIRNET_BRIDGE}"
+    fi
+
     FAILED=0
 }
 
@@ -216,20 +250,33 @@ stop(){
 
     _check_active_bridge_managed_by_vnet ${VIRNET_BRIDGE} || [ "$1" = "force" ] || { echo "${VIRNET_BRIDGE} isn't running"; { [[ "${PPID}" == "1" ]] && return $_true || return $_false; } }
 
-    # if $VIRNET_BRIDGE has attached interfaces, don't destroy the bridge, unless it is called by systemd stop command
-    if [[ ! "${PPID}" == "1" ]] || [ ! "$1" = "force" ]; then
-        if [ "$(ls -A ${gblsysvirtnetdir}/${VIRNET_BRIDGE}/brif/)" ]; then
+    # Fetch a list of virtual interface(s) attached to the virtual bridge
+    _fetch_br_veth_ifaces ${VIRNET_BRIDGE} && { tmp_vbridge_ifaces=1; } || { unset tmp_vbridge_ifaces; }
+
+    # If $VIRNET_BRIDGE has attached interfaces, don't destroy the bridge, unless it is called by systemd stop command
+    # Warn and ask user if would like to proceed for destroy, which is skipped for daemon request and if stop force &/or reboot flag(s) are set.
+    if [[ ! "${PPID}" == "1" ]] || [ ! "$1" = "force" ] || [ ! ${flag_reboot} ]; then
+        if [ ${tmp_vbridge_ifaces} ]; then
             echo -e "» There are virtual adapters attached to this bridge and shutting/stopping this bridge interface will cause network connectivity issues for devices connected to this (\"${VIRNET_BRIDGE}\") interface."
             read -p "   - To proceed shutting down (\"${VIRNET_BRIDGE}\") interface, enter Y. [Y/n] : " choice
             [ "${choice}" = "Y" ] || { echo -e "» User choose to abort shutting down (\"${VIRNET_BRIDGE}\") bridge interface."; return $_false; }
         fi
     fi
+    
+    if [ ${tmp_vbridge_ifaces} ] && [ ! ${flag_reboot} ]; then
+        printf "» You have choose to shutdown (\"${VIRNET_BRIDGE}\") bridge interface which has virtual interfaces attached to it.\n"
+        printf "» The list of virtual interface(s) will be displayed and you need to add them (restore) back if you start this bridge again.\n"
+        _print_help_manual_reattach_veth_ifaces
+    fi
+    
+    [ ${tmp_vbridge_ifaces} ] && _print_br_veth_ifaces
 
+    ## Checks done - proceed to tear down the bridge ##
+    
     [ -d ${gblsysvirtnetdir}/${VIRNET_BRIDGE}-tap ] && { _source_modules "network.tap" && _tapadapter_down; }
     if [ -d ${gblsysvirtnetdir}/${VIRNET_BRIDGE} ]; then
         _ifdown
-        #_iptables_down
-	_iptables_proc down
+    	_iptables_proc down
 
         pid=`cat "${execrundir}"/${VIRNET_BRIDGE}.dnsmasq.pid 2>/dev/null` && kill -9 $pid
         rm -f "${execrundir}"/${VIRNET_BRIDGE}.dnsmasq.pid
@@ -247,11 +294,11 @@ restart_dhcp_server(){
     _check_active_bridge_managed_by_vnet ${VIRNET_BRIDGE} || { echo "Couldn't restart DHCP server for \"${VIRNET_BRIDGE}\" network as it is not up/running. Exiting.."; return $_false; }
     i_dhcppid=$(cat "${execrundir}/${VIRNET_BRIDGE}.dnsmasq.pid";)
     [ -n $i_dhcppid ] &&  [[ $(grep -E "${VIRNET_BRIDGE}.*dnsmasq"  /proc/$i_dhcppid/cmdline) ]] && { 
-	echo -e "Existing DHCP (dnsmasq) process for \"${VIRNET_BRIDGE}\" found with PID:$i_dhcppid will be terminated.";
-    	kill -9 $i_dhcppid || { echo -e "Unable to terminate dnsmasq PID:$i_dhcppid, exiting.."; return $_false; }
+        echo -e "Existing DHCP (dnsmasq) process for \"${VIRNET_BRIDGE}\" found with PID:$i_dhcppid will be terminated.";
+        kill -9 $i_dhcppid || { echo -e "Unable to terminate dnsmasq PID:$i_dhcppid, exiting.."; return $_false; }
     }
     _setup_dhcp_server && { echo -e "Successfully restarted DHCP Server for \"${VIRNET_BRIDGE}\" with new PID:$(cat "${execrundir}/${VIRNET_BRIDGE}.dnsmasq.pid")."; return $_true; } || {
-	echo -e "Unable to start a new instance of DHCP server for \"${VIRNET_BRIDGE}\"."; return $_false; }
+        echo -e "Unable to start a new instance of DHCP server for \"${VIRNET_BRIDGE}\"."; return $_false; }
 }
 
 daemon_fetch_list_virtualnetworks(){
@@ -264,11 +311,19 @@ daemon_fetch_list_virtualnetworks(){
         . "${profiledir}/${i}-vnet.conf"    # Load Profile/Config file
 	printf "Found and processing profile \"${i}\", mode:\"${1}\", autostart:\"${PERSISTENT}\"\n"
 
-        if [ "x${PERSISTENT}" = "xtrue" ] && [ "${1}" = "startup" ]; then
-            #echo "Running ... /shared/config/network/virtualnet/vnet start ${virtnetlist[$count-1]}"
-            start
-        elif [ "${1}" = "shutdown" ]; then
-            stop force
+        if [ "x${PERSISTENT}" = "xtrue" ]; then
+            if [ "${1}" = "startup" ]; then
+                start
+            elif [ "${1}" = "shutdown" ]; then
+                stop force
+            elif [ "${1}" = "reinitiate" ]; then
+                flag_reboot=1
+                stop force || $_true
+                start
+                unset flag_reboot
+            fi
+        else
+            printf "Profile \"${i}\", is not set to run in persistence, vnet daemon does not process non-persistent profile, use vnet command on your terminal instead."
         fi
     done
 
@@ -276,7 +331,7 @@ daemon_fetch_list_virtualnetworks(){
 
 ## Pre-Execution Check ##
 precheck(){
-    # Handles start, stop, reload, force-reload requests.
+    # Handles start, stop, reload requests.
     config="${profiledir}/${2}-vnet.conf"
 
     _check_exec_installed_dir || { return $_false; }
@@ -296,15 +351,16 @@ precheck(){
     	start)
 	    start
 	    ;;
-	stop)
+	    stop)
 	    stop
 	    ;;
-	stop-force)
+	    stop-force)
 	    stop force
 	    ;;
-	restart-dhcp|-rd)
-	    restart_dhcp_server
-	    ;;
+        restart-dhcp|-rd)
+        echo -e "Note: Restart dhcp feature has been temporarily made unavailable due to some bugs present. Will be fixed and re-release."
+        #restart_dhcp_server
+        ;;
  
     esac
 
@@ -316,7 +372,6 @@ precheck(){
 _source_modules "shared"
 # Load iptables.ruleset module file #
 _source_modules "iptables.rulesets"
-
 
 # See how we were called.
 case "$1" in
@@ -332,19 +387,21 @@ case "$1" in
 	precheck $1 $2
     ;;
 
-    startup|shutdown)
+    startup|shutdown|reinitiate)
 	daemon_fetch_list_virtualnetworks $1
     ;;
 
-    restart|reload|force-reload)
+    restart|reload)
+    flag_reboot=1
 	precheck stop $2
 	precheck start $2
+    unset flag_reboot
     ;;
 
     restart-dhcp|-rd)
-	precheck $1 $2
+        precheck $1 $2
     ;;
-    
+
     show|show-profile|-sp)
     _source_modules "profile.manager"
     module_profile_new_main "show" $2
@@ -411,7 +468,7 @@ case "$1" in
     ;;
 
     --show-change-log)
-	[ -f ${topdir}/CHANGELOG ] && cat ${topdir}/CHANGELOG
+	[ -f ${topdir}/CHANGELOG ] && less ${topdir}/CHANGELOG
     ;;
 
     --show-install-dir)
@@ -423,38 +480,40 @@ case "$1" in
     ;;
 
     *)
-        echo -e $shell_script_info
-	_check_exec_installed_dir &>/dev/null && { _exec_mode="Tool"; } || { _exec_mode="Package"; }
-	echo -e "Running vnet as ${_exec_mode} mode.\n"
-	_check_exec_installed_dir &>/dev/null && { echo -e "vnet has been installed on this machine, to remove this kit, run command \"uninstall\".\n"; } || 
-		{ echo -e "Initial setup on the host system required: Run command \"install\" to start the installation process."; }
-	echo -e "\nList of Commands available"
-	echo -e "============================"
-	echo -e "  ▪ For ALL modes:\n"
-	echo -e "\tmacgen \n\t\tRandomly generates an unicast MAC Address.\n"
-	echo -e "\tversion, -v \n\t\tDisplay version information.\n"
-	echo -e "\t--show-change-log \n\t\tDisplays CHANGELOG information on terminal.\n"
-    echo -e "  ▪ For Tool mode:\n"
-	echo -e "\tlist, status, -l \n\t\tList Profile(s) Information and Status.\n"
-    echo -e "\tstart <profile_name> \n\t\tStart virtual network of profile name.\n"
-    echo -e "\tstop <profile_name> \n\t\tStop virtual network of profile name.\n"
-    echo -e "\tstop-force <profile_name> \n\t\tForce Stop virtual network of profile name.\n"
-    echo -e "\trestart, reload <profile_name> \n\t\tRestart virtual network of profile name.\n"
-	echo -e "\tforce-reload <profile_name> \n\t\tRestart (force) virtual network of profile name. Use it when restart/reload does not work.\n"
-	echo -e "\trestart-dhcp, -rd <profile_name> \n\t\tRestart DHCP service for the profile name (virtual network). Use it when changes has been made to dnsmasq.\n"
-	echo -e "\tshow, show-profile, -sp <profile_name_optional> \n\t\tShow configurations of an existing profile.\n"
-	echo -e "\tnew, new-profile, -np <profile_name_optional> \n\t\tCreates a new profile.\n"
-	echo -e "\tedit, edit-profile, -ep <profile_name_optional> \n\t\tEdits an existing profile.\n"
-	echo -e "\texport, export-profile, -exp \n\t\tExports an existing profile.\n"
-	echo -e "\timport, import-profile, -imp \n\t\tImports an existing profile.\n"
-	echo -e "\tdelete, delete-profile, -dp \n\t\tDeletes an existing profile.\n"
-	echo -e "\trename, rename-profile, -rp <profile_name> <new_profile_name> \n\t\tRenames an existing profile.\n"
-	echo -e "\tedit-dhcp-config, -edc <profile_name> \n\t\tEdits dhcp config for the profile.\n"
-	echo -e "\tuninstall \n\t\tUninstalls and removes vnet from the host.\n"
-	echo -e "\t--show-install-dir \n\t\tDisplays the path where vnet tool is installed in.\n"
-	echo -e "  ▪ For Package mode:\n"
-	echo -e "\tinstall \n\t\tInstalls and setup vnet on the host.\n"
-	echo -e "\tupgrade \n\t\tUpgrades vnet with a newer version (if applicable).\n"
+        _check_exec_installed_dir &>/dev/null && { _exec_mode="Tool"; } || { _exec_mode="Package"; }
+    	_check_exec_installed_dir &>/dev/null && { _install_state="vnet has been installed on this machine, to remove this kit, run command \"uninstall\".\n"; } || 
+		{ _install_state="PLEASE TAKE NOTE: Initial setup on the host system required. Run command \"install\" to start the installation process."; }
+     help="$shell_script_info
+\nvnet is currently running as ${_exec_mode} mode.\n${_install_state}
+\n\nList of Commands available
+\n============================
+\n  ▪ For ALL modes:\n
+\n\tmacgen \n\t\tRandomly generates an unicast MAC Address.\n
+\n\tversion, -v \n\t\tDisplay version information.\n
+\n\t--show-change-log \n\t\tDisplays CHANGELOG information on terminal.\n
+\n  ▪ For Tool mode:\n
+\n\tlist, status, -l \n\t\tList Profile(s) Information and Status.\n
+\n\tstart <profile_name> \n\t\tStart virtual network of profile name.\n
+\n\tstop <profile_name> \n\t\tStop virtual network of profile name.\n
+\n\tstop-force <profile_name> \n\t\tForce Stop virtual network of profile name.\n
+\n\trestart, reload <profile_name> \n\t\tRestart virtual network of profile name.\n
+\n\trestart-dhcp, -rd <profile_name> \n\t\tRestart DHCP service for the profile name (virtual network). Use it when changes has been made to dnsmasq.\n
+\n\tshow, show-profile, -sp <profile_name_optional> \n\t\tShow configurations of an existing profile.\n
+\n\tnew, new-profile, -np <profile_name_optional> \n\t\tCreates a new profile.\n
+\n\tedit, edit-profile, -ep <profile_name_optional> \n\t\tEdits an existing profile.\n
+\n\texport, export-profile, -exp \n\t\tExports an existing profile.\n
+\n\timport, import-profile, -imp \n\t\tImports an existing profile.\n
+\n\tdelete, delete-profile, -dp \n\t\tDeletes an existing profile.\n
+\n\trename, rename-profile, -rp <profile_name> <new_profile_name> \n\t\tRenames an existing profile.\n
+\n\tedit-dhcp-config, -edc <profile_name> \n\t\tEdits dhcp config for the profile.\n
+\n\tuninstall \n\t\tUninstalls and removes vnet from the host.\n
+\n\t--show-install-dir \n\t\tDisplays the path where vnet tool is installed in.\n
+\n  ▪ For Package mode:\n
+\n\tinstall \n\t\tInstalls and setup vnet on the host.\n
+\n\tupgrade \n\t\tUpgrades vnet with a newer version (if applicable).\n
+";
+    echo -e $help | less; echo -e $help
+    unset help
 	exit 2
 esac
 
