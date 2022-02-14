@@ -1,6 +1,12 @@
 CHANGELOG
 =========
 
+Version 3.3.0
+Release Date: 14 Feb 2022
+1. Feature: Check if any Network Managers is managing the bridge interface during setup and set it to unmanage mode. Currently supports NetworkManager.
+2. Bugfix: install command should check if existing vnet has been installed on the system and recommend user to use upgrade command instead.
+3. Bugfix: Fix some non-critical bugs discovered in profile manager module.
+
 Version 3.2.6
 Release Date: 21 Jun 2021
 1.  Feature: Add ra-stateless for dnsmasq for DHCPv6

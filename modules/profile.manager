@@ -184,7 +184,7 @@ _get_profile_config_variables(){
     # dnsmasq config default format
     read -d '' config_dnsmasq << EOF
 ##  For help on setting up this conf file, refer to /etc/dnsmasq.conf &/or man dnsmasq  ##
-##  Extra dnsmasq configuration for research bridge interface                           ##
+##  Extra dnsmasq configuration for "${profile_params["0.1-MAIN--VIRNET_BRIDGE"]}" bridge interface                           ##
 
 # 44-47 NetBIOS, NetBIOS over TCP/IP
 dhcp-option=44,0.0.0.0
@@ -633,7 +633,7 @@ module_profile_import_main(){
 	done
 	
     fi
-    rm -rf /tmp/vnet-import-${_ts}
+    rm -rf "${_tmp_inflated_dir}"
     return $_true
 
 

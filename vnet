@@ -1,6 +1,6 @@
 #!/usr/bin/bash -
 [ "${0##*/}" == "vnet" ] || { echo -e "This script shall be of filename \"vnet\" (w/o quotes)"; exit 1; }
-version="3.2.6"
+version="3.3.0"
 shell_script_info="Virtual Network (vnet) Kit ${version}"
 
 _false=1
@@ -63,6 +63,14 @@ _check_exec_installed_dir(){
     [ -f ${topdir}/.installed ] || { echo -e "E: Running vnet directly without installing is stricly disallowed!\n   Please run \"install\" command to begin installation process or \"upgrade\" to upgrade vnet installed on the host.\n   Running vnet without arguments will show the list of commands available based on the mode the tool is running in."; return $_false; }
     . "${topdir}/.installed"
     [[ "${topdir}" == "${VIRNET_INSTALLED_PATH}" ]] || { echo -e "E: Running vnet directory without going through proper installation process is strictly disallowed!\n   Please re-run \"install\" command to re-run the installation process."; return $_false; }
+    return $_true
+}
+
+_deactivate_networkmanagers_managing_bridge(){
+    [ "${1}" != ${VIRNET_BRIDGE} ] && { return $_false; }
+    if [ $(systemctl is-active NetworkManager) ]; then
+        nmcli dev set ${VIRNET_BRIDGE} managed no
+    fi
     return $_true
 }
 
@@ -232,6 +240,9 @@ start(){
     fi
     #_iptables_up
     _iptables_proc up
+
+    #set network managers not to manage this bridge
+    _deactivate_networkmanagers_managing_bridge ${VIRNET_BRIDGE}
 
     _setup_dhcp_server || cleanup
 
@@ -510,7 +521,7 @@ case "$1" in
 \n\t--show-install-dir \n\t\tDisplays the path where vnet tool is installed in.\n
 \n  ▪ For Package mode:\n
 \n\tinstall \n\t\tInstalls and setup vnet on the host.\n
-\n\tupgrade \n\t\tUpgrades vnet with a newer version (if applicable).\n
+\n\tupgrade \n\t\tUpgrades vnet with a newer version (if applicable) or for reinstalling vnet.\n
 ";
     echo -e $help | less; echo -e $help
     unset help

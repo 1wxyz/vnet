@@ -177,6 +177,9 @@ wizard_deploy_install_main(){
     DISTRO=$(grep  "^NAME=" /etc/os-release | cut -d= -f2)
     install_path="${wizard_dir_install_default}"
 
+    ## Check if vnet has been installed based on vnet symlinked path on system bin directory + systemctl vnet service and request user to run upgrade command instead
+    [ $(which vnet) ] && $( systemctl cat vnet.service &>/dev/null ) && { echo -e "vnet has already being installed. Use \"upgrade\" command instead, to check if the installed vnet is eligible for an upgrade."; return $_false; }
+
     echo -e "\n● Step 1: Getting environment information, user input(s).\n"
     process_install_path_usrreq || { return $_false; }
 
